@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  tg-monitor:
+    image: python:3.9-slim
+    container_name: tg-monitor
+    volumes:
+      - ./listener.py:/app/listener.py
+      - ./data:/data
+    working_dir: /app
+    environment:
+      - TG_API_ID=${TG_API_ID}
+      - TG_API_HASH=${TG_API_HASH}
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
+    command: >
+      sh -c "pip install telethon requests && python listener.py"
+    restart: unless-stopped

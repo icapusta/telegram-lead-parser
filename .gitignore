@@ -1,0 +1,5 @@
+.env
+tg_data/
+__pycache__/
+*.session
+*.log

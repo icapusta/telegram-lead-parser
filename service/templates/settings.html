@@ -147,19 +147,21 @@
         --border: rgba(2, 6, 23, 0.10);
         --accent: #2563eb;
       }
+      *, *::before, *::after { box-sizing: border-box; }
       body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
-      .wrap { max-width: 950px; margin: 24px auto; padding: 0 16px; }
+      .wrap { max-width: 1280px; margin: 24px auto; padding: 0 16px; }
       .top { display:flex; gap: 12px; align-items:center; justify-content:space-between; }
       .brand { display:flex; gap: 10px; align-items:baseline; }
       .brand h1 { margin: 0; font-size: 16px; letter-spacing: 0.2px; }
       .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; }
-      .head-actions { display:flex; gap:8px; align-items:center; }
+      .head-actions { display:flex; gap:8px; align-items:center; flex-wrap: wrap; justify-content: flex-end; }
       .card { margin-top: 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 14px; padding: 14px; }
       label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
       textarea { width: 100%; min-height: 160px; resize: vertical; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-family: var(--mono); font-size: 12px; outline: none; }
       input[type="number"] { width:100%; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-size:12px; outline:none; }
-      .row { display:flex; gap: 12px; flex-wrap: wrap; }
-      .row > div { flex: 1 1 420px; }
+      .row { display:grid; grid-template-columns: repeat(2, minmax(320px, 1fr)); gap: 12px; }
+      .row > div { min-width: 0; }
+      .row.row-full { grid-template-columns: 1fr; }
       .toggles { display:flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
       .toggle { display:flex; align-items:center; gap: 8px; font-size: 12px; color: var(--text); }
       .hint { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -172,6 +174,11 @@
       th { color: var(--muted); }
       .ok { color: #2ecc71; }
       .bad { color: #ff5c7a; }
+      @media (max-width: 900px) {
+        .top { align-items:flex-start; flex-direction: column; }
+        .head-actions { justify-content: flex-start; }
+        .row { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
@@ -224,7 +231,7 @@
             </div>
           </div>
 
-          <div class="row" style="margin-top:12px;">
+          <div class="row row-full" style="margin-top:12px;">
             <div style="flex: 1 1 100%;">
               <label>Cliapiproxy models and availability tests</label>
               <div class="head-actions">

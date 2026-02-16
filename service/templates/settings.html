@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Parser Settings</title>
+    <script>
+      (function () {
+        const key = "theme";
+        const saved = localStorage.getItem(key);
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const theme = saved || (prefersDark ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+      })();
+      function toggleTheme() {
+        const key = "theme";
+        const cur = document.documentElement.dataset.theme || "light";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem(key, next);
+      }
+    </script>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #11151b;
+        --text: #e7eef7;
+        --muted: #9db0c4;
+        --border: rgba(255,255,255,0.08);
+        --accent: #58a6ff;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      }
+      :root[data-theme="light"] {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --text: #0f172a;
+        --muted: #475569;
+        --border: rgba(2, 6, 23, 0.10);
+        --accent: #2563eb;
+      }
+      body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+      .wrap { max-width: 950px; margin: 24px auto; padding: 0 16px; }
+      .top { display:flex; gap: 12px; align-items:center; justify-content:space-between; }
+      .brand { display:flex; gap: 10px; align-items:baseline; }
+      .brand h1 { margin: 0; font-size: 16px; letter-spacing: 0.2px; }
+      .brand a { color: var(--accent); text-decoration: none; font-size: 12px; }
+      .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; }
+      .card { margin-top: 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 14px; padding: 14px; }
+      label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      textarea { width: 100%; min-height: 160px; resize: vertical; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-family: var(--mono); font-size: 12px; outline: none; }
+      .row { display:flex; gap: 12px; flex-wrap: wrap; }
+      .row > div { flex: 1 1 420px; }
+      .toggles { display:flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+      .toggle { display:flex; align-items:center; gap: 8px; font-size: 12px; color: var(--text); }
+      .hint { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+      .mono { font-family: var(--mono); }
+      .save { margin-top: 12px; display:flex; gap: 10px; align-items:center; justify-content:flex-end; }
+      input[type="checkbox"] { width: 16px; height: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <h1>Settings</h1>
+          <a href="/">Dashboard</a>
+        </div>
+        <button class="btn" onclick="toggleTheme()">Toggle theme</button>
+      </div>
+
+      <div class="card">
+        <form method="post" action="/settings">
+          <div class="toggles">
+            <label class="toggle"><input type="checkbox" name="keywords_enabled" value="true" {% if cfg.keywords_enabled %}checked{% endif %}/> Keywords filter</label>
+            <label class="toggle"><input type="checkbox" name="stopwords_enabled" value="true" {% if cfg.stopwords_enabled %}checked{% endif %}/> Stopwords filter</label>
+            <label class="toggle"><input type="checkbox" name="llm_enabled" value="true" {% if cfg.llm_enabled %}checked{% endif %}/> LLM classify</label>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Keywords (one per line). If enabled and list is non-empty, message must contain at least one.</label>
+              <textarea name="keywords_text" spellcheck="false">{{ cfg.keywords_text }}</textarea>
+            </div>
+            <div>
+              <label>Stopwords (one per line). If enabled and list is non-empty, any match blocks the message.</label>
+              <textarea name="stopwords_text" spellcheck="false">{{ cfg.stopwords_text }}</textarea>
+            </div>
+          </div>
+
+          <div class="save">
+            <button class="btn" type="submit">Save</button>
+          </div>
+        </form>
+
+        <div class="hint">
+          Ingest endpoint: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+

@@ -4,14 +4,15 @@ import json
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import select
 
 from .config import settings
 from .db import init_db, session
-from .models import TgMonitorEvent, EventStatus
-from .schemas import TgMonitorPayload
+from .models import TgMonitorEvent, EventStatus, AppSettings
+from .schemas import TgMonitorPayload, SettingsPayload
+from .filtering import hard_filter
 from .llm import classify
 from .notify import send_lead_notification, utcnow
 
@@ -30,6 +31,17 @@ def _db():
         yield s
 
 
+def _get_settings(db) -> AppSettings:
+    row = db.exec(select(AppSettings).where(AppSettings.id == 1)).first()
+    if row:
+        return row
+    row = AppSettings(id=1)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "ts": datetime.utcnow().isoformat() + "Z"}
@@ -37,6 +49,15 @@ def health() -> dict:
 
 @app.post("/api/ingest/tg-monitor")
 async def ingest(payload: TgMonitorPayload, db=Depends(_db)) -> dict:
+    cfg = _get_settings(db)
+    hf = hard_filter(
+        text=payload.text,
+        keywords_enabled=cfg.keywords_enabled,
+        stopwords_enabled=cfg.stopwords_enabled,
+        keywords_text=cfg.keywords_text,
+        stopwords_text=cfg.stopwords_text,
+    )
+
     ev = TgMonitorEvent(
         text=payload.text,
         chat_title=payload.chat_title,
@@ -44,7 +65,8 @@ async def ingest(payload: TgMonitorPayload, db=Depends(_db)) -> dict:
         sender_link=payload.sender_link,
         sender_handle=payload.sender_handle,
         link=payload.link,
-        keywords_json=json.dumps(payload.keywords, ensure_ascii=False),
+        # Store either tg-monitor provided keywords (if any), or our own matched list.
+        keywords_json=json.dumps(payload.keywords or hf.matched_keywords, ensure_ascii=False),
         status=EventStatus.pending,
     )
     db.add(ev)
@@ -71,6 +93,37 @@ async def _process_event(event_id: int, db) -> None:
     db.commit()
 
     try:
+        cfg = _get_settings(db)
+        hf = hard_filter(
+            text=ev.text,
+            keywords_enabled=cfg.keywords_enabled,
+            stopwords_enabled=cfg.stopwords_enabled,
+            keywords_text=cfg.keywords_text,
+            stopwords_text=cfg.stopwords_text,
+        )
+
+        if not hf.passed:
+            ev.is_lead = False
+            ev.summary = f"hard_filter:{hf.reason}"
+            ev.confidence = None
+            ev.model_used = "hard-filter"
+            ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
+            ev.status = EventStatus.done
+            db.add(ev)
+            db.commit()
+            return
+
+        if not cfg.llm_enabled:
+            ev.is_lead = False
+            ev.summary = "llm_disabled"
+            ev.confidence = None
+            ev.model_used = "hard-filter"
+            ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
+            ev.status = EventStatus.done
+            db.add(ev)
+            db.commit()
+            return
+
         res, model_used = await classify(ev.text)
         ev.is_lead = res.is_lead
         ev.summary = res.summary
@@ -106,14 +159,42 @@ def dashboard(request: Request, db=Depends(_db)):
     rows = db.exec(
         select(TgMonitorEvent).order_by(TgMonitorEvent.created_at.desc()).limit(200)
     ).all()
+    cfg = _get_settings(db)
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             "rows": rows,
             "public_base_url": settings.public_base_url.rstrip("/"),
+            "cfg": cfg,
         },
     )
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db=Depends(_db)):
+    cfg = _get_settings(db)
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "cfg": cfg,
+            "public_base_url": settings.public_base_url.rstrip("/"),
+        },
+    )
+
+
+@app.post("/settings")
+def update_settings(payload: SettingsPayload, db=Depends(_db)):
+    cfg = _get_settings(db)
+    cfg.keywords_enabled = payload.keywords_enabled
+    cfg.stopwords_enabled = payload.stopwords_enabled
+    cfg.llm_enabled = payload.llm_enabled
+    cfg.keywords_text = payload.keywords_text or ""
+    cfg.stopwords_text = payload.stopwords_text or ""
+    db.add(cfg)
+    db.commit()
+    return RedirectResponse(url="/settings", status_code=303)
 
 
 @app.post("/api/events/{event_id}/retry")

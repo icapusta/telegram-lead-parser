@@ -12,11 +12,18 @@ class TgMonitorPayload(BaseModel):
     sender_link: str = ""
     sender_handle: str = ""
     link: str = ""
-    keywords: List[str] = []
+    keywords: List[str] = Field(default_factory=list)
+
+
+class SettingsPayload(BaseModel):
+    keywords_enabled: bool = True
+    stopwords_enabled: bool = True
+    llm_enabled: bool = True
+    keywords_text: str = ""
+    stopwords_text: str = ""
 
 
 class LLMResult(BaseModel):
     is_lead: bool
     summary: str
     confidence: float | None = None
-

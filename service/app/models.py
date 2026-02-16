@@ -45,3 +45,18 @@ class TgMonitorEvent(SQLModel, table=True):
     notified: bool = Field(default=False, index=True)
     notified_at: Optional[datetime] = None
 
+
+class AppSettings(SQLModel, table=True):
+    """
+    Single-user settings row (id=1). We keep it in DB so it can be edited via UI.
+    """
+
+    id: Optional[int] = Field(default=1, primary_key=True)
+
+    keywords_enabled: bool = Field(default=True)
+    stopwords_enabled: bool = Field(default=True)
+    llm_enabled: bool = Field(default=True)
+
+    # Newline-separated terms (case-insensitive substring match).
+    keywords_text: str = ""
+    stopwords_text: str = ""

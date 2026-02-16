@@ -35,5 +35,8 @@ class Settings(BaseSettings):
     auth_user: str = Field(default="", validation_alias="APP_AUTH_USER")
     auth_pass: str = Field(default="", validation_alias="APP_AUTH_PASS")
 
+    # Internal API token (for trusted in-network agents).
+    internal_token: str = Field(default="", validation_alias="APP_INTERNAL_TOKEN")
+
 
 settings = Settings()

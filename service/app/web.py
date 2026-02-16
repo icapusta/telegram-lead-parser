@@ -52,6 +52,15 @@ def _require_auth(creds: HTTPBasicCredentials = Depends(security)) -> None:
     )
 
 
+def _require_internal_token(request: Request) -> None:
+    if not settings.internal_token:
+        raise HTTPException(status_code=500, detail="internal token not configured")
+    tok = request.headers.get("x-internal-token", "")
+    if secrets.compare_digest(tok, settings.internal_token):
+        return
+    raise HTTPException(status_code=401, detail="unauthorized")
+
+
 def _get_settings(db) -> AppSettings:
     row = db.exec(select(AppSettings).where(AppSettings.id == 1)).first()
     if row:
@@ -102,6 +111,18 @@ async def ingest(payload: TgMonitorPayload, db=Depends(_db)) -> dict:
         pass
 
     return {"ok": True, "id": ev.id}
+
+
+@app.get("/api/internal/settings")
+def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> dict:
+    cfg = _get_settings(db)
+    return {
+        "keywords_enabled": cfg.keywords_enabled,
+        "stopwords_enabled": cfg.stopwords_enabled,
+        "llm_enabled": cfg.llm_enabled,
+        "keywords_text": cfg.keywords_text,
+        "stopwords_text": cfg.stopwords_text,
+    }
 
 
 async def _process_event(event_id: int, db) -> None:

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy.pool import NullPool
 
 from .config import settings
 
 
-engine = create_engine(settings.db_url, connect_args={"check_same_thread": False})
+if settings.db_url.startswith("sqlite:"):
+    # SQLite + many short-lived background tasks: avoid QueuePool exhaustion.
+    engine = create_engine(
+        settings.db_url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=NullPool,
+    )
+else:
+    engine = create_engine(settings.db_url)
 
 
 def init_db() -> None:

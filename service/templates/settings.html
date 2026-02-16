@@ -19,6 +19,114 @@
         document.documentElement.dataset.theme = next;
         localStorage.setItem(key, next);
       }
+      function esc(s) {
+        return String(s ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+      function selectedModels() {
+        const boxes = Array.from(document.querySelectorAll("input[name='llm_model_pick']:checked"));
+        return boxes.map((x) => x.value);
+      }
+      async function loadLLMModels() {
+        const wrap = document.getElementById("llm-models-wrap");
+        wrap.innerHTML = "<div class='hint'>Loading models...</div>";
+        const r = await fetch("/api/llm/models");
+        if (!r.ok) {
+          wrap.innerHTML = "<div class='hint'>Failed to load models</div>";
+          return;
+        }
+        const data = await r.json();
+        if (!Array.isArray(data) || data.length === 0) {
+          wrap.innerHTML = "<div class='hint'>No models returned by Cliapiproxy</div>";
+          return;
+        }
+        const rows = data.map((m) => `
+          <tr data-model-id="${esc(m.id)}">
+            <td><input type="checkbox" name="llm_model_pick" value="${esc(m.id)}" ${m.in_priority ? "checked" : ""}></td>
+            <td class="mono">${esc(m.id)}</td>
+            <td>${esc(m.owned_by || "")}</td>
+            <td>${m.allowed ? "<span class='ok'>allowed</span>" : "<span class='bad'>blocked</span>"}</td>
+            <td>${esc(m.block_reason || "")}</td>
+            <td class="mono test-status">-</td>
+            <td class="mono test-latency">-</td>
+            <td class="mono test-limits">-</td>
+            <td class="mono test-error">-</td>
+            <td><button class="btn" type="button" onclick="testOneModel('${esc(m.id)}')">Test</button></td>
+          </tr>
+        `).join("");
+        wrap.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Model</th>
+                  <th>Owned by</th>
+                  <th>Policy</th>
+                  <th>Reason</th>
+                  <th>HTTP</th>
+                  <th>Latency</th>
+                  <th>Limits</th>
+                  <th>Error</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+      function applyTestResult(res) {
+        const tr = document.querySelector(`tr[data-model-id="${CSS.escape(res.model_id || "")}"]`);
+        if (!tr) return;
+        tr.querySelector(".test-status").textContent = res.status_code || 0;
+        tr.querySelector(".test-latency").textContent = (res.latency_ms || 0) + "ms";
+        const lim = res.rate_limits || {};
+        const limText = [
+          lim["x-ratelimit-limit-requests"] ? `req:${lim["x-ratelimit-remaining-requests"] || "?"}/${lim["x-ratelimit-limit-requests"]}` : "",
+          lim["x-ratelimit-limit-tokens"] ? `tok:${lim["x-ratelimit-remaining-tokens"] || "?"}/${lim["x-ratelimit-limit-tokens"]}` : "",
+          lim["x-ratelimit-limit"] ? `gen:${lim["x-ratelimit-remaining"] || "?"}/${lim["x-ratelimit-limit"]}` : "",
+          lim["retry-after"] ? `retry:${lim["retry-after"]}s` : "",
+        ].filter(Boolean).join(" | ");
+        tr.querySelector(".test-limits").textContent = limText || "-";
+        tr.querySelector(".test-error").textContent = res.error || "-";
+      }
+      async function testOneModel(modelId) {
+        const r = await fetch("/api/llm/test-model", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({model_id: modelId}),
+        });
+        if (!r.ok) return;
+        const res = await r.json();
+        applyTestResult(res);
+      }
+      async function testSelectedModels() {
+        const models = selectedModels();
+        if (!models.length) return;
+        const r = await fetch("/api/llm/test-models", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({model_ids: models, limit: models.length}),
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const res of (data.results || [])) applyTestResult(res);
+      }
+      async function testAllLoadedModels() {
+        const models = Array.from(document.querySelectorAll("input[name='llm_model_pick']")).map((x) => x.value);
+        if (!models.length) return;
+        const r = await fetch("/api/llm/test-models", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({model_ids: models, limit: models.length}),
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const res of (data.results || [])) applyTestResult(res);
+      }
     </script>
     <style>
       :root {
@@ -58,6 +166,12 @@
       .mono { font-family: var(--mono); }
       .save { margin-top: 12px; display:flex; gap: 10px; align-items:center; justify-content:flex-end; }
       input[type="checkbox"] { width: 16px; height: 16px; }
+      .table-wrap { width:100%; overflow:auto; border: 1px solid var(--border); border-radius: 10px; margin-top: 10px; }
+      table { width:100%; min-width:1100px; border-collapse: collapse; }
+      th, td { padding: 8px; border-bottom: 1px solid var(--border); font-size:12px; text-align:left; vertical-align:top; }
+      th { color: var(--muted); }
+      .ok { color: #2ecc71; }
+      .bad { color: #ff5c7a; }
     </style>
   </head>
   <body>
@@ -107,6 +221,18 @@
                 <label class="toggle"><input type="checkbox" name="exclude_openai_owned_models" value="true" {% if cfg.exclude_openai_owned_models %}checked{% endif %}/> Exclude models where owned_by=openai</label>
               </div>
               <div class="hint">Routing applies to lead classification and auto stop-word suggestions.</div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:12px;">
+            <div style="flex: 1 1 100%;">
+              <label>Cliapiproxy models and availability tests</label>
+              <div class="head-actions">
+                <button class="btn" type="button" onclick="loadLLMModels()">Load models</button>
+                <button class="btn" type="button" onclick="testSelectedModels()">Test selected</button>
+                <button class="btn" type="button" onclick="testAllLoadedModels()">Test all loaded</button>
+              </div>
+              <div id="llm-models-wrap" class="hint">Click "Load models" to fetch all available models from Cliapiproxy.</div>
             </div>
           </div>
 

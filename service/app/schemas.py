@@ -51,3 +51,14 @@ class InternalDiscoveryTargetRequest(BaseModel):
     status: str = "discovered"
     note: str = ""
     queued_join_scan: bool | None = None
+
+
+class LLMModelTestRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    timeout_s: float | None = None
+
+
+class LLMModelsBulkTestRequest(BaseModel):
+    model_ids: list[str] = Field(default_factory=list)
+    limit: int = 20
+    timeout_s: float | None = None

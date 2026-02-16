@@ -29,6 +29,17 @@ def _normalize_model_id(model_id: str) -> str:
     return model_id.strip()
 
 
+def model_block_reason(*, model_id: str, owned_by: str | None, exclude_openai_owned_models: bool) -> str | None:
+    if exclude_openai_owned_models and (owned_by or "").lower() == "openai":
+        return "owned_by_openai"
+    mid = (model_id or "").casefold()
+    if "icapusta@gmail.com" in mid or "weflyinsky@gmail.com" in mid:
+        return "blocked_account_model"
+    if any(x in mid for x in ("whisper", "guard", "vision", "image", "audio", "tts", "stt")):
+        return "non_chat_model"
+    return None
+
+
 def _default_model_priority() -> list[str]:
     # MVP: pragmatic defaults. We'll later replace this with a ranked list sourced
     # from public benchmarks + local health stats.
@@ -58,16 +69,11 @@ def _parse_model_priority_text(raw: str | None) -> list[str]:
 
 
 def _is_model_allowed(mi: ModelInfo, *, exclude_openai_owned_models: bool) -> bool:
-    if exclude_openai_owned_models and (mi.owned_by or "").lower() == "openai":
-        return False
-    # Hard blocklist: user requested never to use models tied to these accounts.
-    mid = (mi.id or "").casefold()
-    if "icapusta@gmail.com" in mid or "weflyinsky@gmail.com" in mid:
-        return False
-    # Avoid non-chat models and noisy utility models.
-    if any(x in mid for x in ("whisper", "guard", "vision", "image", "audio", "tts", "stt")):
-        return False
-    return True
+    return model_block_reason(
+        model_id=mi.id,
+        owned_by=mi.owned_by,
+        exclude_openai_owned_models=exclude_openai_owned_models,
+    ) is None
 
 
 def _preferred_match(available_id: str, preferred: str) -> bool:
@@ -421,3 +427,79 @@ async def suggest_stopwords(
                 continue
 
         raise RuntimeError(f"all stopword attempts failed: {last_err}") from last_err
+
+
+def extract_rate_limit_headers(headers: httpx.Headers) -> dict[str, str]:
+    # Common header names across providers/proxies.
+    names = [
+        "x-ratelimit-limit-requests",
+        "x-ratelimit-remaining-requests",
+        "x-ratelimit-limit-tokens",
+        "x-ratelimit-remaining-tokens",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "retry-after",
+    ]
+    out: dict[str, str] = {}
+    for n in names:
+        v = headers.get(n)
+        if v:
+            out[n] = v
+    return out
+
+
+async def test_model_availability(
+    *,
+    model_id: str,
+    timeout_s: float,
+) -> dict:
+    """
+    Lightweight availability probe for a model.
+    Returns status, latency and any exposed rate-limit headers.
+    """
+    if not settings.cliproxy_base_url:
+        raise RuntimeError("cliproxy_base_url is not set")
+    if not settings.cliproxy_api_key:
+        raise RuntimeError("cliproxy_api_key is not set")
+
+    base = settings.cliproxy_base_url.rstrip("/")
+    url = f"{base}/chat/completions"
+    body = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Return JSON: {\"ok\":true}"}],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+
+    import time
+
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, headers=_auth_headers(), json=body, timeout=timeout_s)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        rate_headers = extract_rate_limit_headers(r.headers)
+        payload = None
+        try:
+            payload = r.json()
+        except Exception:
+            payload = None
+        content = _extract_content_text(payload or {}) if payload else ""
+        return {
+            "model_id": model_id,
+            "ok": bool(r.status_code < 400),
+            "status_code": int(r.status_code),
+            "latency_ms": latency_ms,
+            "error": "" if r.status_code < 400 else (content[:240] if content else r.text[:240]),
+            "rate_limits": rate_headers,
+        }
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "model_id": model_id,
+            "ok": False,
+            "status_code": 0,
+            "latency_ms": latency_ms,
+            "error": str(e)[:240],
+            "rate_limits": {},
+        }

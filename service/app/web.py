@@ -21,9 +21,19 @@ from .schemas import (
     InternalClassifyResponse,
     InternalDiscoveryLogRequest,
     InternalDiscoveryTargetRequest,
+    LLMModelTestRequest,
+    LLMModelsBulkTestRequest,
 )
 from .filtering import hard_filter, request_intent_filter
-from .llm import classify, suggest_stopwords, LLMRoutingOptions, default_model_priority_text
+from .llm import (
+    classify,
+    suggest_stopwords,
+    list_models,
+    model_block_reason,
+    test_model_availability,
+    LLMRoutingOptions,
+    default_model_priority_text,
+)
 from .notify import send_event_notification, utcnow
 from .tg_bot_api import set_webhook, answer_callback_query, edit_message_reply_markup, send_message_html
 
@@ -421,6 +431,65 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "queries_per_tick": cfg.queries_per_tick,
         "search_results_per_query": cfg.search_results_per_query,
     }
+
+
+@app.get("/api/llm/models")
+async def llm_models(db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict]:
+    cfg = _get_settings(db)
+    preferred = [x.strip() for x in (cfg.llm_model_priority_text or "").splitlines() if x.strip()]
+    preferred_set = {x.casefold() for x in preferred}
+    async with httpx.AsyncClient() as client:
+        models = await list_models(client)
+    out: list[dict] = []
+    for m in models:
+        br = model_block_reason(
+            model_id=m.id,
+            owned_by=m.owned_by,
+            exclude_openai_owned_models=bool(cfg.exclude_openai_owned_models),
+        )
+        out.append(
+            {
+                "id": m.id,
+                "owned_by": m.owned_by or "",
+                "allowed": br is None,
+                "block_reason": br or "",
+                "in_priority": m.id.casefold() in preferred_set,
+            }
+        )
+    return out
+
+
+@app.post("/api/llm/test-model")
+async def llm_test_model(req: LLMModelTestRequest, db=Depends(_db), _auth=Depends(_require_auth)) -> dict:
+    cfg = _get_settings(db)
+    timeout_s = float(req.timeout_s if req.timeout_s is not None else cfg.llm_timeout_s)
+    timeout_s = max(3.0, min(90.0, timeout_s))
+    return await test_model_availability(model_id=req.model_id.strip(), timeout_s=timeout_s)
+
+
+@app.post("/api/llm/test-models")
+async def llm_test_models(req: LLMModelsBulkTestRequest, db=Depends(_db), _auth=Depends(_require_auth)) -> dict:
+    cfg = _get_settings(db)
+    timeout_s = float(req.timeout_s if req.timeout_s is not None else cfg.llm_timeout_s)
+    timeout_s = max(3.0, min(90.0, timeout_s))
+    lim = max(1, min(60, int(req.limit or 20)))
+
+    model_ids = [x.strip() for x in (req.model_ids or []) if x and x.strip()]
+    if not model_ids:
+        preferred = [x.strip() for x in (cfg.llm_model_priority_text or "").splitlines() if x.strip()]
+        model_ids = preferred[:lim]
+    else:
+        model_ids = model_ids[:lim]
+
+    # Keep pressure moderate on provider.
+    sem = asyncio.Semaphore(4)
+
+    async def _one(mid: str) -> dict:
+        async with sem:
+            return await test_model_availability(model_id=mid, timeout_s=timeout_s)
+
+    results = await asyncio.gather(*[_one(mid) for mid in model_ids])
+    return {"results": results}
 
 
 @app.post("/api/internal/classify")

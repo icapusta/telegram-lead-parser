@@ -15,14 +15,6 @@ class TgMonitorPayload(BaseModel):
     keywords: List[str] = Field(default_factory=list)
 
 
-class SettingsPayload(BaseModel):
-    keywords_enabled: bool = True
-    stopwords_enabled: bool = True
-    llm_enabled: bool = True
-    keywords_text: str = ""
-    stopwords_text: str = ""
-
-
 class LLMResult(BaseModel):
     is_lead: bool
     summary: str

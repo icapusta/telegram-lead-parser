@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import select
@@ -11,7 +11,7 @@ from sqlmodel import select
 from .config import settings
 from .db import init_db, session
 from .models import TgMonitorEvent, EventStatus, AppSettings
-from .schemas import TgMonitorPayload, SettingsPayload
+from .schemas import TgMonitorPayload
 from .filtering import hard_filter
 from .llm import classify
 from .notify import send_lead_notification, utcnow
@@ -185,13 +185,20 @@ def settings_page(request: Request, db=Depends(_db)):
 
 
 @app.post("/settings")
-def update_settings(payload: SettingsPayload, db=Depends(_db)):
+def update_settings(
+    keywords_enabled: bool = Form(False),
+    stopwords_enabled: bool = Form(False),
+    llm_enabled: bool = Form(False),
+    keywords_text: str = Form(""),
+    stopwords_text: str = Form(""),
+    db=Depends(_db),
+):
     cfg = _get_settings(db)
-    cfg.keywords_enabled = payload.keywords_enabled
-    cfg.stopwords_enabled = payload.stopwords_enabled
-    cfg.llm_enabled = payload.llm_enabled
-    cfg.keywords_text = payload.keywords_text or ""
-    cfg.stopwords_text = payload.stopwords_text or ""
+    cfg.keywords_enabled = bool(keywords_enabled)
+    cfg.stopwords_enabled = bool(stopwords_enabled)
+    cfg.llm_enabled = bool(llm_enabled)
+    cfg.keywords_text = keywords_text or ""
+    cfg.stopwords_text = stopwords_text or ""
     db.add(cfg)
     db.commit()
     return RedirectResponse(url="/settings", status_code=303)

@@ -330,6 +330,7 @@ async def discovery_loop() -> None:
                     continue
 
                 chats = list(getattr(res, "chats", []) or [])
+                print(f"search q='{q}' got {len(chats)} chats", flush=True)
                 # Prefer megagroups and channels with linked chats.
                 for ch in chats:
                     can, why = budget.can_join()

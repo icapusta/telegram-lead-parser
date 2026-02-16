@@ -327,7 +327,8 @@ async def discovery_loop() -> None:
                 # Telegram search for public groups/channels.
                 try:
                     res = await client(functions.contacts.SearchRequest(q=q, limit=20))
-                except Exception:
+                except Exception as e:
+                    print(f"search q='{q}' failed: {e}", flush=True)
                     continue
 
                 chats = list(getattr(res, "chats", []) or [])

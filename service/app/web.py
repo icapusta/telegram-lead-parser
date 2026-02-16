@@ -13,8 +13,8 @@ from sqlmodel import select
 
 from .config import settings
 from .db import init_db, session
-from .models import TgMonitorEvent, EventStatus, AppSettings
-from .schemas import TgMonitorPayload, InternalClassifyRequest, InternalClassifyResponse
+from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog
+from .schemas import TgMonitorPayload, InternalClassifyRequest, InternalClassifyResponse, InternalDiscoveryLogRequest
 from .filtering import hard_filter
 from .llm import classify, suggest_stopwords
 from .notify import send_event_notification, utcnow
@@ -130,6 +130,15 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "llm_enabled": cfg.llm_enabled,
         "keywords_text": cfg.keywords_text,
         "stopwords_text": cfg.stopwords_text,
+        "discovery_enabled": cfg.discovery_enabled,
+        "discovery_queries_text": cfg.discovery_queries_text,
+        "discovery_interval_s": cfg.discovery_interval_s,
+        "scan_days": cfg.scan_days,
+        "scan_max_messages": cfg.scan_max_messages,
+        "scan_llm_sample": cfg.scan_llm_sample,
+        "join_per_day": cfg.join_per_day,
+        "join_per_hour": cfg.join_per_hour,
+        "auto_leave_if_no_candidates": cfg.auto_leave_if_no_candidates,
     }
 
 
@@ -284,6 +293,22 @@ def settings_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth
     )
 
 
+@app.get("/discovery", response_class=HTMLResponse)
+def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
+    cfg = _get_settings(db)
+    rows = db.exec(
+        select(DiscoveryLog).order_by(DiscoveryLog.created_at.desc()).limit(200)
+    ).all()
+    return templates.TemplateResponse(
+        request,
+        "discovery.html",
+        {
+            "cfg": cfg,
+            "rows": rows,
+        },
+    )
+
+
 @app.post("/settings")
 def update_settings(
     keywords_enabled: bool = Form(False),
@@ -303,6 +328,67 @@ def update_settings(
     db.add(cfg)
     db.commit()
     return RedirectResponse(url="/settings", status_code=303)
+
+
+@app.post("/discovery")
+def update_discovery_settings(
+    discovery_enabled: bool = Form(False),
+    discovery_queries_text: str = Form(""),
+    discovery_interval_s: int = Form(1800),
+    scan_days: int = Form(30),
+    scan_max_messages: int = Form(300),
+    scan_llm_sample: int = Form(12),
+    join_per_day: int = Form(8),
+    join_per_hour: int = Form(2),
+    auto_leave_if_no_candidates: bool = Form(False),
+    db=Depends(_db),
+    _auth=Depends(_require_auth),
+):
+    cfg = _get_settings(db)
+    cfg.discovery_enabled = bool(discovery_enabled)
+    cfg.discovery_queries_text = discovery_queries_text or ""
+    cfg.discovery_interval_s = max(60, int(discovery_interval_s or 1800))
+    cfg.scan_days = max(1, int(scan_days or 30))
+    cfg.scan_max_messages = max(30, int(scan_max_messages or 300))
+    cfg.scan_llm_sample = max(1, int(scan_llm_sample or 12))
+    cfg.join_per_day = max(1, int(join_per_day or 8))
+    cfg.join_per_hour = max(1, int(join_per_hour or 2))
+    cfg.auto_leave_if_no_candidates = bool(auto_leave_if_no_candidates)
+    db.add(cfg)
+    db.commit()
+    return RedirectResponse(url="/discovery", status_code=303)
+
+
+@app.get("/api/discovery/logs")
+def discovery_logs(limit: int = 200, db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict]:
+    lim = min(max(int(limit or 200), 1), 1000)
+    rows = db.exec(select(DiscoveryLog).order_by(DiscoveryLog.created_at.desc()).limit(lim)).all()
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat(),
+            "level": r.level,
+            "event": r.event,
+            "message": r.message,
+            "chat_username": r.chat_username,
+            "query": r.query,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/api/internal/discovery/log")
+def internal_discovery_log(req: InternalDiscoveryLogRequest, db=Depends(_db), _it=Depends(_require_internal_token)) -> dict:
+    row = DiscoveryLog(
+        level=(req.level or "info")[:20],
+        event=(req.event or "")[:80],
+        message=(req.message or "")[:2000],
+        chat_username=(req.chat_username or "")[:120],
+        query=(req.query or "")[:200],
+    )
+    db.add(row)
+    db.commit()
+    return {"ok": True, "id": row.id}
 
 
 @app.post("/api/events/{event_id}/retry")

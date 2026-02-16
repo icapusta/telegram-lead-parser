@@ -32,3 +32,11 @@ class InternalClassifyResponse(BaseModel):
     summary: str
     confidence: float | None = None
     model_used: str
+
+
+class InternalDiscoveryLogRequest(BaseModel):
+    level: str = "info"
+    event: str = ""
+    message: str
+    chat_username: str = ""
+    query: str = ""

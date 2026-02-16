@@ -65,3 +65,24 @@ class AppSettings(SQLModel, table=True):
     # Newline-separated terms (case-insensitive substring match).
     keywords_text: str = ""
     stopwords_text: str = ""
+
+    # Discovery settings (tg-agent).
+    discovery_enabled: bool = Field(default=True)
+    discovery_queries_text: str = ""
+    discovery_interval_s: int = Field(default=1800)
+    scan_days: int = Field(default=30)
+    scan_max_messages: int = Field(default=300)
+    scan_llm_sample: int = Field(default=12)
+    join_per_day: int = Field(default=8)
+    join_per_hour: int = Field(default=2)
+    auto_leave_if_no_candidates: bool = Field(default=True)
+
+
+class DiscoveryLog(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    level: str = Field(default="info", index=True)
+    event: str = Field(default="", index=True)
+    message: str = ""
+    chat_username: str = Field(default="", index=True)
+    query: str = ""

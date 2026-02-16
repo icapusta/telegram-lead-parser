@@ -61,6 +61,19 @@ class FilterConfig:
     stopwords: list[str]
 
 
+@dataclass(frozen=True)
+class DiscoveryConfig:
+    enabled: bool
+    queries: list[str]
+    interval_s: float
+    scan_days: int
+    scan_max_messages: int
+    scan_llm_sample: int
+    join_per_day: int
+    join_per_hour: int
+    auto_leave_if_no_candidates: bool
+
+
 def hard_pass(cfg: FilterConfig, text: str) -> tuple[bool, str]:
     t = (text or "").casefold()
     if cfg.stopwords_enabled and cfg.stopwords:
@@ -125,24 +138,25 @@ SESSION_PATH = os.environ.get("TG_SESSION_PATH", "/data/monitor_session")
 PARSER_INGEST_URL = os.environ.get("PARSER_INGEST_URL", "http://parser-service:8080/api/ingest/tg-monitor")
 PARSER_INTERNAL_SETTINGS_URL = os.environ.get("PARSER_INTERNAL_SETTINGS_URL", "http://parser-service:8080/api/internal/settings")
 PARSER_INTERNAL_CLASSIFY_URL = os.environ.get("PARSER_INTERNAL_CLASSIFY_URL", "http://parser-service:8080/api/internal/classify")
+PARSER_INTERNAL_DISCOVERY_LOG_URL = os.environ.get("PARSER_INTERNAL_DISCOVERY_LOG_URL", "http://parser-service:8080/api/internal/discovery/log")
 PARSER_INTERNAL_TOKEN = os.environ.get("PARSER_INTERNAL_TOKEN", "")
 
 BUSINESS_FOLDER_QUERY = os.environ.get("BUSINESS_FOLDER_QUERY", "бизнес").casefold()
 
-DISCOVERY_ENABLED = env_bool("DISCOVERY_ENABLED", False)
-DISCOVERY_QUERIES = _split_lines(os.environ.get("DISCOVERY_QUERIES", ""))
-DISCOVERY_INTERVAL_S = float(os.environ.get("DISCOVERY_INTERVAL_S", "1800"))  # 30m
+DEFAULT_DISCOVERY_ENABLED = env_bool("DISCOVERY_ENABLED", False)
+DEFAULT_DISCOVERY_QUERIES = _split_lines(os.environ.get("DISCOVERY_QUERIES", ""))
+DEFAULT_DISCOVERY_INTERVAL_S = float(os.environ.get("DISCOVERY_INTERVAL_S", "1800"))
 
-SCAN_DAYS = env_int("SCAN_DAYS", 30)
-SCAN_MAX_MESSAGES = env_int("SCAN_MAX_MESSAGES", 300)
-SCAN_LLM_SAMPLE = env_int("SCAN_LLM_SAMPLE", 12)
+DEFAULT_SCAN_DAYS = env_int("SCAN_DAYS", 30)
+DEFAULT_SCAN_MAX_MESSAGES = env_int("SCAN_MAX_MESSAGES", 300)
+DEFAULT_SCAN_LLM_SAMPLE = env_int("SCAN_LLM_SAMPLE", 12)
 
-JOIN_PER_DAY = env_int("JOIN_PER_DAY", 8)
-JOIN_PER_HOUR = env_int("JOIN_PER_HOUR", 2)
+DEFAULT_JOIN_PER_DAY = env_int("JOIN_PER_DAY", 8)
+DEFAULT_JOIN_PER_HOUR = env_int("JOIN_PER_HOUR", 2)
 JOIN_BUDGET_PATH = os.environ.get("JOIN_BUDGET_PATH", "/data/join_budget.json")
 AGENT_STATE_PATH = os.environ.get("AGENT_STATE_PATH", "/data/agent_state.json")
 
-AUTO_LEAVE_IF_NO_CANDIDATES = env_bool("AUTO_LEAVE_IF_NO_CANDIDATES", True)
+DEFAULT_AUTO_LEAVE_IF_NO_CANDIDATES = env_bool("AUTO_LEAVE_IF_NO_CANDIDATES", True)
 
 
 client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
@@ -286,19 +300,52 @@ async def _join_target(target: str):
     return ent
 
 
-async def _fetch_filter_config() -> FilterConfig:
+async def _push_discovery_log(*, level: str, event: str, message: str, chat_username: str = "", query: str = "") -> None:
+    headers = {"x-internal-token": PARSER_INTERNAL_TOKEN} if PARSER_INTERNAL_TOKEN else {}
+    body = {
+        "level": (level or "info")[:20],
+        "event": (event or "")[:80],
+        "message": (message or "")[:2000],
+        "chat_username": (chat_username or "")[:120],
+        "query": (query or "")[:200],
+    }
+    try:
+        async with httpx.AsyncClient() as h:
+            await h.post(PARSER_INTERNAL_DISCOVERY_LOG_URL, headers=headers, json=body, timeout=5.0)
+    except Exception:
+        pass
+
+
+async def _log(level: str, event: str, message: str, chat_username: str = "", query: str = "") -> None:
+    print(f"[{level}] {event} {chat_username} {query} {message}", flush=True)
+    await _push_discovery_log(level=level, event=event, message=message, chat_username=chat_username, query=query)
+
+
+async def _fetch_runtime_config() -> tuple[FilterConfig, DiscoveryConfig]:
     headers = {"x-internal-token": PARSER_INTERNAL_TOKEN} if PARSER_INTERNAL_TOKEN else {}
     async with httpx.AsyncClient() as h:
         r = await h.get(PARSER_INTERNAL_SETTINGS_URL, headers=headers, timeout=10.0)
         r.raise_for_status()
         data = r.json()
-    return FilterConfig(
+    filter_cfg = FilterConfig(
         keywords_enabled=bool(data.get("keywords_enabled", True)),
         stopwords_enabled=bool(data.get("stopwords_enabled", True)),
         llm_enabled=bool(data.get("llm_enabled", True)),
         keywords=_split_lines(data.get("keywords_text", "")),
         stopwords=_split_lines(data.get("stopwords_text", "")),
     )
+    discovery_cfg = DiscoveryConfig(
+        enabled=bool(data.get("discovery_enabled", DEFAULT_DISCOVERY_ENABLED)),
+        queries=_split_lines(data.get("discovery_queries_text", "")) or DEFAULT_DISCOVERY_QUERIES,
+        interval_s=float(data.get("discovery_interval_s", DEFAULT_DISCOVERY_INTERVAL_S)),
+        scan_days=max(1, int(data.get("scan_days", DEFAULT_SCAN_DAYS))),
+        scan_max_messages=max(30, int(data.get("scan_max_messages", DEFAULT_SCAN_MAX_MESSAGES))),
+        scan_llm_sample=max(1, int(data.get("scan_llm_sample", DEFAULT_SCAN_LLM_SAMPLE))),
+        join_per_day=max(1, int(data.get("join_per_day", DEFAULT_JOIN_PER_DAY))),
+        join_per_hour=max(1, int(data.get("join_per_hour", DEFAULT_JOIN_PER_HOUR))),
+        auto_leave_if_no_candidates=bool(data.get("auto_leave_if_no_candidates", DEFAULT_AUTO_LEAVE_IF_NO_CANDIDATES)),
+    )
+    return filter_cfg, discovery_cfg
 
 
 async def _internal_classify_text(h: httpx.AsyncClient, text: str) -> bool:
@@ -309,8 +356,8 @@ async def _internal_classify_text(h: httpx.AsyncClient, text: str) -> bool:
     return bool(data.get("is_lead", False))
 
 
-async def _scan_recent_messages(entity, cfg: FilterConfig) -> tuple[int, int]:
-    cutoff = utcnow() - timedelta(days=SCAN_DAYS)
+async def _scan_recent_messages(entity, cfg: FilterConfig, dcfg: DiscoveryConfig) -> tuple[int, int]:
+    cutoff = utcnow() - timedelta(days=dcfg.scan_days)
     hard_candidates = 0
     llm_positive = 0
     chat = await client.get_entity(entity)
@@ -319,14 +366,14 @@ async def _scan_recent_messages(entity, cfg: FilterConfig) -> tuple[int, int]:
     clean_id = str(chat_peer_id).replace("-100", "")
     sampled_texts: list[str] = []
 
-    async for msg in client.iter_messages(entity, offset_date=cutoff, limit=SCAN_MAX_MESSAGES):
+    async for msg in client.iter_messages(entity, offset_date=cutoff, limit=dcfg.scan_max_messages):
         if not getattr(msg, "message", None):
             continue
         ok, _reason = hard_pass(cfg, msg.message)
         if not ok:
             continue
         hard_candidates += 1
-        if len(sampled_texts) < SCAN_LLM_SAMPLE:
+        if len(sampled_texts) < dcfg.scan_llm_sample:
             sampled_texts.append(msg.message)
         # Push into parser-service for full LLM decision + bot notify.
         try:
@@ -364,34 +411,39 @@ async def _scan_recent_messages(entity, cfg: FilterConfig) -> tuple[int, int]:
 
 
 async def discovery_loop() -> None:
-    budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=JOIN_PER_DAY, per_hour=JOIN_PER_HOUR)
+    budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=DEFAULT_JOIN_PER_DAY, per_hour=DEFAULT_JOIN_PER_HOUR)
     state = AgentState(AGENT_STATE_PATH)
     while True:
         try:
-            if not DISCOVERY_ENABLED or not DISCOVERY_QUERIES:
+            cfg, dcfg = await _fetch_runtime_config()
+            budget.per_day = dcfg.join_per_day
+            budget.per_hour = dcfg.join_per_hour
+
+            if not dcfg.enabled or not dcfg.queries:
                 await asyncio.sleep(30)
                 continue
 
-            print(f"discovery tick: queries={len(DISCOVERY_QUERIES)}", flush=True)
-            cfg = await _fetch_filter_config()
-            for q in DISCOVERY_QUERIES:
+            await _log("info", "tick", f"queries={len(dcfg.queries)} interval={int(dcfg.interval_s)}s")
+            for q in dcfg.queries:
                 can, why = budget.can_join()
                 if not can:
+                    await _log("warn", "budget_block", why, query=q)
                     break
 
                 # Telegram search for public groups/channels.
                 try:
                     res = await client(functions.contacts.SearchRequest(q=q, limit=20))
                 except Exception as e:
-                    print(f"search q='{q}' failed: {e}", flush=True)
+                    await _log("error", "search_failed", str(e), query=q)
                     continue
 
                 chats = list(getattr(res, "chats", []) or [])
-                print(f"search q='{q}' got {len(chats)} chats", flush=True)
+                await _log("info", "search", f"found={len(chats)}", query=q)
                 # Prefer megagroups and channels with linked chats.
                 for ch in chats:
                     can, why = budget.can_join()
                     if not can:
+                        await _log("warn", "budget_block", why, query=q)
                         break
 
                     if isinstance(ch, types.Channel):
@@ -411,32 +463,36 @@ async def discovery_loop() -> None:
                     state.mark_seen(username)
 
                     try:
-                        print(f"join try @{username} (q='{q}')", flush=True)
+                        await _log("info", "join_try", "joining", chat_username=f"@{username}", query=q)
                         try:
                             await client(functions.channels.JoinChannelRequest(channel=ch))
                             budget.mark_join()
-                            print(f"joined @{username}", flush=True)
+                            await _log("info", "join_ok", "joined", chat_username=f"@{username}", query=q)
                         except UserAlreadyParticipantError:
-                            print(f"already in @{username}", flush=True)
-                    except Exception:
+                            await _log("info", "join_ok", "already_participant", chat_username=f"@{username}", query=q)
+                    except Exception as e:
+                        await _log("error", "join_failed", str(e), chat_username=f"@{username}", query=q)
                         continue
 
                     # Add to Business folder.
                     try:
                         peer = await client.get_input_entity(ch)
                         ok = await _add_to_business(peer)
-                        print(f"business add @{username}: {ok}", flush=True)
-                    except Exception:
-                        pass
+                        await _log("info", "business_add", f"ok={ok}", chat_username=f"@{username}", query=q)
+                    except Exception as e:
+                        await _log("warn", "business_add_failed", str(e), chat_username=f"@{username}", query=q)
 
                     # Scan last N days; if LLM found no leads, optionally leave.
                     try:
-                        hard_cands, llm_cands = await _scan_recent_messages(ch, cfg)
-                        print(
-                            f"scan @{username}: hard_candidates={hard_cands}, llm_candidates={llm_cands}",
-                            flush=True,
+                        hard_cands, llm_cands = await _scan_recent_messages(ch, cfg, dcfg)
+                        await _log(
+                            "info",
+                            "scan",
+                            f"hard_candidates={hard_cands}, llm_candidates={llm_cands}",
+                            chat_username=f"@{username}",
+                            query=q,
                         )
-                        if AUTO_LEAVE_IF_NO_CANDIDATES and llm_cands == 0:
+                        if dcfg.auto_leave_if_no_candidates and llm_cands == 0:
                             try:
                                 await client(functions.channels.LeaveChannelRequest(channel=ch))
                                 try:
@@ -444,17 +500,20 @@ async def discovery_loop() -> None:
                                     await _remove_from_business(peer)
                                 except Exception:
                                     pass
-                                print(f"left @{username} (no llm candidates)", flush=True)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                                await _log("info", "leave", "no_llm_candidates", chat_username=f"@{username}", query=q)
+                            except Exception as e:
+                                await _log("error", "leave_failed", str(e), chat_username=f"@{username}", query=q)
+                        elif llm_cands > 0:
+                            await _log("info", "keep", "llm_candidate_found", chat_username=f"@{username}", query=q)
+                    except Exception as e:
+                        await _log("error", "scan_failed", str(e), chat_username=f"@{username}", query=q)
 
                     # Small pause between joins to be gentle.
                     await asyncio.sleep(8)
 
-            await asyncio.sleep(DISCOVERY_INTERVAL_S)
-        except Exception:
+            await asyncio.sleep(max(60.0, float(dcfg.interval_s)))
+        except Exception as e:
+            await _log("error", "loop_error", str(e))
             await asyncio.sleep(60)
 
 
@@ -526,13 +585,12 @@ async def monitor_loop() -> None:
 
 async def main() -> None:
     # Simple guard: internal token is required for discovery scans (settings fetch).
-    if DISCOVERY_ENABLED and not PARSER_INTERNAL_TOKEN:
+    if DEFAULT_DISCOVERY_ENABLED and not PARSER_INTERNAL_TOKEN:
         print("DISCOVERY_ENABLED=1 but PARSER_INTERNAL_TOKEN is empty", flush=True)
 
     await client.start()
     tasks = [asyncio.create_task(monitor_loop())]
-    if DISCOVERY_ENABLED:
-        tasks.append(asyncio.create_task(discovery_loop()))
+    tasks.append(asyncio.create_task(discovery_loop()))
     await asyncio.gather(*tasks)
 
 

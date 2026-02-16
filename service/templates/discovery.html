@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Discovery</title>
+    <script>
+      (function () {
+        const key = "theme";
+        const saved = localStorage.getItem(key);
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+      })();
+      function toggleTheme() {
+        const key = "theme";
+        const cur = document.documentElement.dataset.theme || "light";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem(key, next);
+      }
+      async function refreshLogs() {
+        const r = await fetch("/api/discovery/logs?limit=200");
+        if (!r.ok) return;
+        const data = await r.json();
+        const tbody = document.getElementById("logs");
+        tbody.innerHTML = "";
+        for (const row of data) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td class="small">${row.created_at || ""}</td>
+            <td><span class="pill ${row.level === "error" ? "bad" : row.level === "warn" ? "warn" : "good"}">${row.level || "info"}</span></td>
+            <td class="mono">${row.event || ""}</td>
+            <td>${row.chat_username || ""}</td>
+            <td>${row.query || ""}</td>
+            <td>${row.message || ""}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+      }
+      setInterval(refreshLogs, 10000);
+    </script>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #11151b;
+        --text: #e7eef7;
+        --muted: #9db0c4;
+        --border: rgba(255,255,255,0.08);
+        --accent: #58a6ff;
+        --good: #2ecc71;
+        --bad: #ff5c7a;
+        --warn: #f1c40f;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      }
+      :root[data-theme="light"] {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --text: #0f172a;
+        --muted: #475569;
+        --border: rgba(2, 6, 23, 0.10);
+        --accent: #2563eb;
+      }
+      body { margin:0; background:var(--bg); color:var(--text); font-family:var(--sans); }
+      .wrap { max-width: 1200px; margin:24px auto; padding:0 16px; }
+      .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+      .brand { display:flex; align-items:baseline; gap:10px; }
+      .brand h1 { margin:0; font-size:18px; }
+      .brand a { color:var(--accent); text-decoration:none; font-size:12px; }
+      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; }
+      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
+      .grid { display:grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap:12px; }
+      @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
+      label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+      input[type="number"], textarea { width:100%; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:10px; padding:8px; font-size:12px; }
+      textarea { min-height:150px; resize:vertical; font-family:var(--mono); }
+      .toggles { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; }
+      .toggle { display:flex; gap:8px; align-items:center; font-size:12px; }
+      .save { margin-top:12px; display:flex; justify-content:flex-end; }
+      table { width:100%; border-collapse:collapse; }
+      th, td { padding:8px; border-bottom:1px solid var(--border); font-size:12px; text-align:left; vertical-align:top; }
+      th { color:var(--muted); }
+      .small { color:var(--muted); font-size:11px; }
+      .mono { font-family:var(--mono); }
+      .pill { display:inline-flex; border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; }
+      .pill.good { color:var(--good); border-color:rgba(46,204,113,0.35); }
+      .pill.bad { color:var(--bad); border-color:rgba(255,92,122,0.35); }
+      .pill.warn { color:var(--warn); border-color:rgba(241,196,15,0.35); }
+      .head-actions { display:flex; gap:8px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <h1>Discovery</h1>
+          <a href="/">Dashboard</a>
+          <a href="/settings">Settings</a>
+        </div>
+        <div class="head-actions">
+          <button class="btn" type="button" onclick="refreshLogs()">Refresh logs</button>
+          <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <form method="post" action="/discovery">
+          <div class="toggles">
+            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Discovery enabled</label>
+            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> Auto leave if no leads</label>
+          </div>
+          <div class="grid">
+            <div>
+              <label>Поисковые запросы (по одному на строку)</label>
+              <textarea name="discovery_queries_text" spellcheck="false">{{ cfg.discovery_queries_text }}</textarea>
+            </div>
+            <div>
+              <label>Discovery interval (сек)</label>
+              <input type="number" min="60" name="discovery_interval_s" value="{{ cfg.discovery_interval_s }}" />
+              <label style="margin-top:10px;">Scan days</label>
+              <input type="number" min="1" name="scan_days" value="{{ cfg.scan_days }}" />
+              <label style="margin-top:10px;">Scan max messages</label>
+              <input type="number" min="30" name="scan_max_messages" value="{{ cfg.scan_max_messages }}" />
+              <label style="margin-top:10px;">LLM sample size</label>
+              <input type="number" min="1" name="scan_llm_sample" value="{{ cfg.scan_llm_sample }}" />
+              <label style="margin-top:10px;">Join per day</label>
+              <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
+              <label style="margin-top:10px;">Join per hour</label>
+              <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
+            </div>
+          </div>
+          <div class="save">
+            <button class="btn" type="submit">Save discovery settings</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="small" style="margin-bottom:10px;">Последние 200 событий discovery</div>
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Level</th>
+              <th>Event</th>
+              <th>Chat</th>
+              <th>Query</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="logs">
+            {% for r in rows %}
+              <tr>
+                <td class="small">{{ r.created_at }}</td>
+                <td>
+                  {% if r.level == "error" %}
+                    <span class="pill bad">{{ r.level }}</span>
+                  {% elif r.level == "warn" %}
+                    <span class="pill warn">{{ r.level }}</span>
+                  {% else %}
+                    <span class="pill good">{{ r.level }}</span>
+                  {% endif %}
+                </td>
+                <td class="mono">{{ r.event }}</td>
+                <td>{{ r.chat_username }}</td>
+                <td>{{ r.query }}</td>
+                <td>{{ r.message }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

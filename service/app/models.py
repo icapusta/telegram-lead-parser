@@ -76,6 +76,11 @@ class AppSettings(SQLModel, table=True):
     join_per_day: int = Field(default=8)
     join_per_hour: int = Field(default=2)
     auto_leave_if_no_candidates: bool = Field(default=True)
+    # Search safety limits (to avoid API abuse / account bans).
+    search_requests_per_day: int = Field(default=300)
+    search_requests_per_hour: int = Field(default=30)
+    queries_per_tick: int = Field(default=25)
+    search_results_per_query: int = Field(default=20)
 
 
 class DiscoveryLog(SQLModel, table=True):

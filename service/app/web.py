@@ -374,6 +374,10 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "join_per_day": cfg.join_per_day,
         "join_per_hour": cfg.join_per_hour,
         "auto_leave_if_no_candidates": cfg.auto_leave_if_no_candidates,
+        "search_requests_per_day": cfg.search_requests_per_day,
+        "search_requests_per_hour": cfg.search_requests_per_hour,
+        "queries_per_tick": cfg.queries_per_tick,
+        "search_results_per_query": cfg.search_results_per_query,
     }
 
 
@@ -611,6 +615,10 @@ def update_discovery_settings(
     join_per_day: int = Form(8),
     join_per_hour: int = Form(2),
     auto_leave_if_no_candidates: bool = Form(False),
+    search_requests_per_day: int = Form(300),
+    search_requests_per_hour: int = Form(30),
+    queries_per_tick: int = Form(25),
+    search_results_per_query: int = Form(20),
     db=Depends(_db),
     _auth=Depends(_require_auth),
 ):
@@ -624,6 +632,10 @@ def update_discovery_settings(
     cfg.join_per_day = max(1, int(join_per_day or 8))
     cfg.join_per_hour = max(1, int(join_per_hour or 2))
     cfg.auto_leave_if_no_candidates = bool(auto_leave_if_no_candidates)
+    cfg.search_requests_per_day = max(20, int(search_requests_per_day or 300))
+    cfg.search_requests_per_hour = max(5, int(search_requests_per_hour or 30))
+    cfg.queries_per_tick = max(1, int(queries_per_tick or 25))
+    cfg.search_results_per_query = max(5, min(50, int(search_results_per_query or 20)))
     db.add(cfg)
     db.commit()
     return RedirectResponse(url="/discovery", status_code=303)

@@ -78,6 +78,7 @@
             <tr>
               <th>Updated</th>
               <th>Status</th>
+              <th>Вступал</th>
               <th>Source</th>
               <th>Target</th>
               <th>Username</th>
@@ -97,6 +98,13 @@
                   <span class="pill bad">{{ r.status }}</span>
                 {% else %}
                   <span class="pill warn">{{ r.status }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.status in ["joined", "kept", "left"] %}
+                  <span class="pill good">yes</span>
+                {% else %}
+                  <span class="pill warn">no</span>
                 {% endif %}
               </td>
               <td>{{ r.source }}</td>

@@ -128,6 +128,14 @@
               <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
               <label style="margin-top:10px;">Join per hour</label>
               <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
+              <label style="margin-top:10px;">Search requests per day</label>
+              <input type="number" min="20" name="search_requests_per_day" value="{{ cfg.search_requests_per_day }}" />
+              <label style="margin-top:10px;">Search requests per hour</label>
+              <input type="number" min="5" name="search_requests_per_hour" value="{{ cfg.search_requests_per_hour }}" />
+              <label style="margin-top:10px;">Queries per tick</label>
+              <input type="number" min="1" name="queries_per_tick" value="{{ cfg.queries_per_tick }}" />
+              <label style="margin-top:10px;">Search results per query</label>
+              <input type="number" min="5" max="50" name="search_results_per_query" value="{{ cfg.search_results_per_query }}" />
             </div>
           </div>
           <div class="save">

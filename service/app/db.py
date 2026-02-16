@@ -59,6 +59,14 @@ def _migrate_sqlite() -> None:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN join_per_hour INTEGER DEFAULT 2")
             if "auto_leave_if_no_candidates" not in app_cols:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN auto_leave_if_no_candidates BOOLEAN DEFAULT 1")
+            if "search_requests_per_day" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN search_requests_per_day INTEGER DEFAULT 300")
+            if "search_requests_per_hour" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN search_requests_per_hour INTEGER DEFAULT 30")
+            if "queries_per_tick" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN queries_per_tick INTEGER DEFAULT 25")
+            if "search_results_per_query" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN search_results_per_query INTEGER DEFAULT 20")
 
             for st in stmts:
                 conn.exec_driver_sql(st)

@@ -73,6 +73,10 @@ class DiscoveryConfig:
     join_per_day: int
     join_per_hour: int
     auto_leave_if_no_candidates: bool
+    search_requests_per_day: int
+    search_requests_per_hour: int
+    queries_per_tick: int
+    search_results_per_query: int
 
 
 def hard_pass(cfg: FilterConfig, text: str) -> tuple[bool, str]:
@@ -156,9 +160,14 @@ DEFAULT_SCAN_LLM_SAMPLE = env_int("SCAN_LLM_SAMPLE", 12)
 DEFAULT_JOIN_PER_DAY = env_int("JOIN_PER_DAY", 8)
 DEFAULT_JOIN_PER_HOUR = env_int("JOIN_PER_HOUR", 2)
 JOIN_BUDGET_PATH = os.environ.get("JOIN_BUDGET_PATH", "/data/join_budget.json")
+SEARCH_BUDGET_PATH = os.environ.get("SEARCH_BUDGET_PATH", "/data/search_budget.json")
 AGENT_STATE_PATH = os.environ.get("AGENT_STATE_PATH", "/data/agent_state.json")
 
 DEFAULT_AUTO_LEAVE_IF_NO_CANDIDATES = env_bool("AUTO_LEAVE_IF_NO_CANDIDATES", True)
+DEFAULT_SEARCH_REQUESTS_PER_DAY = env_int("SEARCH_REQUESTS_PER_DAY", 300)
+DEFAULT_SEARCH_REQUESTS_PER_HOUR = env_int("SEARCH_REQUESTS_PER_HOUR", 30)
+DEFAULT_QUERIES_PER_TICK = env_int("QUERIES_PER_TICK", 25)
+DEFAULT_SEARCH_RESULTS_PER_QUERY = env_int("SEARCH_RESULTS_PER_QUERY", 20)
 EXTERNAL_SEARCH_ENABLED = env_bool("EXTERNAL_SEARCH_ENABLED", True)
 SEARCH_ENGINE_ENABLED = env_bool("SEARCH_ENGINE_ENABLED", True)
 TGSTAT_SEARCH_ENABLED = env_bool("TGSTAT_SEARCH_ENABLED", True)
@@ -361,7 +370,7 @@ def _extract_tme_targets_from_text(text: str) -> list[str]:
     return out
 
 
-async def _search_engine_targets(query: str) -> list[str]:
+async def _search_engine_targets(query: str, limit: int) -> list[str]:
     # DuckDuckGo HTML SERP as a lightweight source for t.me links.
     q = f"site:t.me {query}"
     url = f"https://duckduckgo.com/html/?q={quote_plus(q)}"
@@ -380,10 +389,10 @@ async def _search_engine_targets(query: str) -> list[str]:
             decoded += "\n" + unquote(m.group(1))
         except Exception:
             continue
-    return _extract_tme_targets_from_text(decoded)[:EXTERNAL_RESULTS_PER_QUERY]
+    return _extract_tme_targets_from_text(decoded)[:limit]
 
 
-async def _tgstat_targets(query: str) -> list[str]:
+async def _tgstat_targets(query: str, limit: int) -> list[str]:
     # TGStat search pages often contain references to telegram links.
     url = f"https://tgstat.ru/search?search={quote_plus(query)}"
     try:
@@ -393,7 +402,7 @@ async def _tgstat_targets(query: str) -> list[str]:
             html = r.text
     except Exception:
         return []
-    return _extract_tme_targets_from_text(html)[:EXTERNAL_RESULTS_PER_QUERY]
+    return _extract_tme_targets_from_text(html)[:limit]
 
 
 async def _join_target(target: str):
@@ -492,6 +501,10 @@ async def _fetch_runtime_config() -> tuple[FilterConfig, DiscoveryConfig]:
         join_per_day=max(1, int(data.get("join_per_day", DEFAULT_JOIN_PER_DAY))),
         join_per_hour=max(1, int(data.get("join_per_hour", DEFAULT_JOIN_PER_HOUR))),
         auto_leave_if_no_candidates=bool(data.get("auto_leave_if_no_candidates", DEFAULT_AUTO_LEAVE_IF_NO_CANDIDATES)),
+        search_requests_per_day=max(20, int(data.get("search_requests_per_day", DEFAULT_SEARCH_REQUESTS_PER_DAY))),
+        search_requests_per_hour=max(5, int(data.get("search_requests_per_hour", DEFAULT_SEARCH_REQUESTS_PER_HOUR))),
+        queries_per_tick=max(1, int(data.get("queries_per_tick", DEFAULT_QUERIES_PER_TICK))),
+        search_results_per_query=max(5, min(50, int(data.get("search_results_per_query", DEFAULT_SEARCH_RESULTS_PER_QUERY)))),
     )
     return filter_cfg, discovery_cfg
 
@@ -652,22 +665,36 @@ async def _post_join_flow(
 
 async def discovery_loop() -> None:
     budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=DEFAULT_JOIN_PER_DAY, per_hour=DEFAULT_JOIN_PER_HOUR)
+    search_budget = JoinBudget(path=SEARCH_BUDGET_PATH, per_day=DEFAULT_SEARCH_REQUESTS_PER_DAY, per_hour=DEFAULT_SEARCH_REQUESTS_PER_HOUR)
     state = AgentState(AGENT_STATE_PATH)
     while True:
         try:
             cfg, dcfg = await _fetch_runtime_config()
             budget.per_day = dcfg.join_per_day
             budget.per_hour = dcfg.join_per_hour
+            search_budget.per_day = dcfg.search_requests_per_day
+            search_budget.per_hour = dcfg.search_requests_per_hour
 
             if not dcfg.enabled or not dcfg.queries:
                 await asyncio.sleep(30)
                 continue
 
             await _log("info", "tick", f"queries={len(dcfg.queries)} interval={int(dcfg.interval_s)}s")
+            processed_queries = 0
             for q in dcfg.queries:
+                if processed_queries >= dcfg.queries_per_tick:
+                    await _log("warn", "queries_tick_limit", f"limit={dcfg.queries_per_tick}", query=q)
+                    break
+                processed_queries += 1
+
                 # Telegram search for public groups/channels.
+                can_s, why_s = search_budget.can_join()
+                if not can_s:
+                    await _log("warn", "search_budget_block", why_s, query=q)
+                    break
                 try:
-                    res = await client(functions.contacts.SearchRequest(q=q, limit=20))
+                    res = await client(functions.contacts.SearchRequest(q=q, limit=dcfg.search_results_per_query))
+                    search_budget.mark_join()
                 except Exception as e:
                     await _log("error", "search_failed", str(e), query=q)
                     continue
@@ -723,6 +750,15 @@ async def discovery_loop() -> None:
                             await _log("info", "join_ok", "already_participant", chat_username=f"@{username}", query=q)
                     except Exception as e:
                         await _log("error", "join_failed", str(e), chat_username=f"@{username}", query=q)
+                        await _save_discovery_target(
+                            target_key=target_key,
+                            target="@" + username,
+                            username=username,
+                            source="tg_search",
+                            query=q,
+                            status="failed",
+                            note=f"join_failed:{str(e)[:120]}",
+                        )
                         continue
 
                     await _post_join_flow(
@@ -743,9 +779,19 @@ async def discovery_loop() -> None:
                 external_targets: list[tuple[str, str]] = []
                 if EXTERNAL_SEARCH_ENABLED:
                     if SEARCH_ENGINE_ENABLED:
-                        external_targets.extend([("search_engine", t) for t in (await _search_engine_targets(q))])
+                        can_s, why_s = search_budget.can_join()
+                        if can_s:
+                            external_targets.extend([("search_engine", t) for t in (await _search_engine_targets(q, dcfg.search_results_per_query))])
+                            search_budget.mark_join()
+                        else:
+                            await _log("warn", "search_budget_block", why_s, query=q)
                     if TGSTAT_SEARCH_ENABLED:
-                        external_targets.extend([("tgstat", t) for t in (await _tgstat_targets(q))])
+                        can_s, why_s = search_budget.can_join()
+                        if can_s:
+                            external_targets.extend([("tgstat", t) for t in (await _tgstat_targets(q, dcfg.search_results_per_query))])
+                            search_budget.mark_join()
+                        else:
+                            await _log("warn", "search_budget_block", why_s, query=q)
 
                 # Dedupe by normalized key and cap attempts per query.
                 uniq_targets: list[tuple[str, str]] = []
@@ -756,7 +802,7 @@ async def discovery_loop() -> None:
                         continue
                     seen_keys.add(k)
                     uniq_targets.append((src, t))
-                    if len(uniq_targets) >= EXTERNAL_RESULTS_PER_QUERY:
+                    if len(uniq_targets) >= dcfg.search_results_per_query:
                         break
 
                 if uniq_targets:
@@ -807,6 +853,15 @@ async def discovery_loop() -> None:
                             joined = None
                     except Exception as e:
                         await _log("error", "join_failed", str(e), chat_username=display_name, query=q)
+                        await _save_discovery_target(
+                            target_key=tk,
+                            target=target,
+                            username=username,
+                            source=src,
+                            query=q,
+                            status="failed",
+                            note=f"join_failed:{str(e)[:120]}",
+                        )
                         continue
 
                     # Resolve a channel-like entity for post-join processing.

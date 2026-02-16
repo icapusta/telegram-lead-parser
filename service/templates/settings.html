@@ -27,6 +27,13 @@
         { id: "or-qwen3-coder-free", provider: "OpenRouter", link: "https://openrouter.ai/models" },
         { id: "z.ai-glm-4.7-flash", provider: "Z.ai", link: "https://www.z.ai/" }
       ];
+      const PROVIDER_PRESETS = [
+        { id: "openai", name: "OpenAI", docs: "https://platform.openai.com/docs/models", baseUrl: "https://api.openai.com/v1/models" },
+        { id: "gemini", name: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/models", baseUrl: "https://generativelanguage.googleapis.com/v1beta/models" },
+        { id: "anthropic", name: "Anthropic", docs: "https://docs.anthropic.com/claude/docs/models-overview", baseUrl: "https://api.anthropic.com/v1/models" },
+        { id: "openrouter", name: "OpenRouter", docs: "https://openrouter.ai/models", baseUrl: "https://openrouter.ai/api/v1/models" },
+        { id: "cliapiproxy", name: "Cliapiproxy", docs: "https://parser.tunecrm.su/settings", baseUrl: "" }
+      ];
 
       function toggleTheme() {
         const key = "theme";
@@ -80,27 +87,27 @@
         return "";
       }
 
-      function ensureModelInConfig(modelId) {
+      function ensureModelInConfig(modelId, opts = {}) {
         const cfg = parseModelCfg();
         if (!cfg[modelId]) {
           cfg[modelId] = {
             enabled: true,
             timeout_s: Number(document.querySelector("input[name='llm_timeout_s']").value || 15),
-            link: guessModelLink(modelId),
-            notes: ""
+            link: opts.link || guessModelLink(modelId),
+            notes: opts.notes || ""
           };
           saveModelCfg(cfg);
         }
       }
 
-      function addModel(modelId) {
+      function addModel(modelId, opts = {}) {
         if (!modelId) return;
         const lines = getPriorityLines();
         if (!lines.some((x) => x.toLowerCase() === modelId.toLowerCase())) {
           lines.push(modelId);
           setPriorityLines(lines);
         }
-        ensureModelInConfig(modelId);
+        ensureModelInConfig(modelId, opts);
         renderConfiguredModels();
       }
 
@@ -115,6 +122,73 @@
         if (!modelId) return;
         addModel(modelId);
         inp.value = "";
+      }
+
+      function providerMetaById(pid) {
+        return PROVIDER_PRESETS.find((p) => p.id === pid) || null;
+      }
+
+      function openProviderModal() {
+        const m = document.getElementById("provider-model-modal");
+        m.style.display = "flex";
+      }
+
+      function closeProviderModal() {
+        const m = document.getElementById("provider-model-modal");
+        m.style.display = "none";
+      }
+
+      function onProviderChange() {
+        const pid = document.getElementById("provider-id").value;
+        const meta = providerMetaById(pid);
+        const docs = document.getElementById("provider-docs");
+        const base = document.getElementById("provider-base-url");
+        docs.textContent = meta ? meta.docs : "-";
+        docs.href = meta ? meta.docs : "#";
+        if (meta && !base.value.trim()) base.value = meta.baseUrl || "";
+      }
+
+      async function loadProviderModels() {
+        const pid = document.getElementById("provider-id").value;
+        const apiKey = document.getElementById("provider-api-key").value.trim();
+        const baseUrl = document.getElementById("provider-base-url").value.trim();
+        const status = document.getElementById("provider-load-status");
+        const wrap = document.getElementById("provider-models-wrap");
+        status.textContent = "Загрузка...";
+        wrap.innerHTML = "";
+
+        const r = await fetch("/api/llm/provider-models", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({provider: pid, api_key: apiKey, base_url: baseUrl}),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          status.textContent = data.detail || "Не удалось загрузить модели";
+          return;
+        }
+        status.textContent = `Найдено моделей: ${Number(data.count || 0)}`;
+        const options = (data.models || []).map((m) => `<option value="${esc(m.id)}">${esc(m.name || m.id)} (${esc(m.id)})</option>`).join("");
+        wrap.innerHTML = `
+          <label>Выбери модель</label>
+          <select id="provider-model-select">${options}</select>
+          <div class="inline-controls" style="margin-top:8px;">
+            <button class="btn" type="button" onclick="addSelectedProviderModel()">Добавить модель</button>
+          </div>
+        `;
+      }
+
+      function addSelectedProviderModel() {
+        const pid = document.getElementById("provider-id").value;
+        const sel = document.getElementById("provider-model-select");
+        if (!sel) return;
+        const modelId = sel.value || "";
+        const meta = providerMetaById(pid);
+        addModel(modelId, {
+          link: meta ? meta.docs : guessModelLink(modelId),
+          notes: meta ? `provider=${meta.name}` : ""
+        });
+        closeProviderModal();
       }
 
       function removeModel(modelId) {
@@ -315,6 +389,11 @@
       function initPopularSelect() {
         const sel = document.getElementById("popular-model-select");
         sel.innerHTML = POPULAR_MODELS.map((m) => `<option value="${esc(m.id)}">${esc(m.id)} (${esc(m.provider)})</option>`).join("");
+        const psel = document.getElementById("provider-id");
+        if (psel) {
+          psel.innerHTML = PROVIDER_PRESETS.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+          onProviderChange();
+        }
       }
 
       function beforeSubmit() {
@@ -375,10 +454,16 @@
       .ok { color: #2ecc71; }
       .bad { color: #ff5c7a; }
       .inline-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .modal-backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:1000; align-items:center; justify-content:center; padding:16px; }
+      .modal-card { width:min(760px, 100%); border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
+      .modal-title { margin:0 0 10px 0; font-size:16px; }
+      .modal-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+      .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
       @media (max-width: 900px) {
         .top { align-items:flex-start; flex-direction: column; }
         .head-actions { justify-content: flex-start; }
         .row { grid-template-columns: 1fr; }
+        .modal-grid { grid-template-columns:1fr; }
       }
     </style>
   </head>
@@ -438,6 +523,7 @@
               <div class="inline-controls">
                 <select id="popular-model-select"></select>
                 <button class="btn" type="button" onclick="addPopularModel()">Добавить</button>
+                <button class="btn" type="button" onclick="openProviderModal()">Добавить через провайдер</button>
               </div>
               <div class="hint">Примеры: OpenAI, Gemini, Anthropic, OpenRouter, Z.ai.</div>
               <div class="inline-controls" style="margin-top:8px;">
@@ -474,6 +560,38 @@
 
         <div class="hint">
           URL приёма сообщений: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="provider-model-modal" class="modal-backdrop" onclick="if(event.target===this) closeProviderModal()">
+      <div class="modal-card">
+        <h3 class="modal-title">Добавить модель через провайдер</h3>
+        <div class="modal-grid">
+          <div>
+            <label>Провайдер</label>
+            <select id="provider-id" onchange="onProviderChange()"></select>
+          </div>
+          <div>
+            <label>API key</label>
+            <input id="provider-api-key" type="text" placeholder="Вставь API ключ" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label>Base URL списка моделей (опционально)</label>
+            <input id="provider-base-url" type="text" placeholder="Оставь пустым для URL по умолчанию" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label>Ссылка на документацию провайдера</label>
+            <a id="provider-docs" class="mono" href="#" target="_blank" rel="noreferrer">-</a>
+          </div>
+        </div>
+        <div class="inline-controls" style="margin-top:10px;">
+          <button class="btn" type="button" onclick="loadProviderModels()">Загрузить модели</button>
+          <span id="provider-load-status" class="hint" style="margin-top:0;"></span>
+        </div>
+        <div id="provider-models-wrap" style="margin-top:10px;"></div>
+        <div class="modal-actions">
+          <button class="btn" type="button" onclick="closeProviderModal()">Закрыть</button>
         </div>
       </div>
     </div>

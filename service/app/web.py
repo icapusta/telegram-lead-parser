@@ -24,6 +24,7 @@ from .schemas import (
     InternalDiscoveryTargetRequest,
     LLMModelTestRequest,
     LLMModelsBulkTestRequest,
+    ProviderModelsRequest,
 )
 from .filtering import hard_filter, request_intent_filter
 from .llm import (
@@ -580,6 +581,112 @@ async def llm_test_models(req: LLMModelsBulkTestRequest, db=Depends(_db), _auth=
             success=bool(r.get("ok")),
         )
     return {"results": results}
+
+
+@app.post("/api/llm/provider-models")
+async def llm_provider_models(req: ProviderModelsRequest, _auth=Depends(_require_auth)) -> dict:
+    provider = (req.provider or "").strip().casefold()
+    api_key = (req.api_key or "").strip()
+    base_url = (req.base_url or "").strip()
+
+    presets = {
+        "openai": {
+            "url": "https://api.openai.com/v1/models",
+            "docs": "https://platform.openai.com/docs/models",
+            "headers": lambda k: {"Authorization": f"Bearer {k}"} if k else {},
+        },
+        "openrouter": {
+            "url": "https://openrouter.ai/api/v1/models",
+            "docs": "https://openrouter.ai/models",
+            "headers": lambda k: {"Authorization": f"Bearer {k}"} if k else {},
+        },
+        "anthropic": {
+            "url": "https://api.anthropic.com/v1/models",
+            "docs": "https://docs.anthropic.com/claude/docs/models-overview",
+            "headers": lambda k: (
+                {"x-api-key": k, "anthropic-version": "2023-06-01"} if k else {"anthropic-version": "2023-06-01"}
+            ),
+        },
+        "gemini": {
+            "url": "https://generativelanguage.googleapis.com/v1beta/models",
+            "docs": "https://ai.google.dev/gemini-api/docs/models",
+            "headers": lambda _k: {},
+        },
+        "cliapiproxy": {
+            "url": f"{settings.cliproxy_base_url.rstrip('/')}/models",
+            "docs": "https://parser.tunecrm.su/settings",
+            "headers": lambda k: {"Authorization": f"Bearer {k}"} if k else {},
+        },
+    }
+    if provider not in presets:
+        raise HTTPException(status_code=400, detail="unsupported provider")
+
+    p = presets[provider]
+    url = base_url or p["url"]
+    headers = p["headers"](api_key)
+    params = {}
+    if provider == "gemini":
+        if not api_key:
+            raise HTTPException(status_code=400, detail="api_key required for gemini")
+        params["key"] = api_key
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=headers, params=params, timeout=20.0)
+        try:
+            data = r.json()
+        except Exception:
+            data = {}
+        if r.status_code >= 400:
+            msg = ""
+            if isinstance(data, dict):
+                err = data.get("error")
+                if isinstance(err, dict):
+                    msg = str(err.get("message") or "")
+                elif isinstance(err, str):
+                    msg = err
+            msg = msg or r.text[:240] or f"http={r.status_code}"
+            raise HTTPException(status_code=400, detail=f"{provider}: {msg}")
+
+        models: list[dict] = []
+        if provider in ("openai", "anthropic", "openrouter", "cliapiproxy"):
+            items = data.get("data") if isinstance(data, dict) else []
+            if isinstance(items, list):
+                for x in items:
+                    if not isinstance(x, dict):
+                        continue
+                    mid = str(x.get("id") or "").strip()
+                    if not mid:
+                        continue
+                    models.append({"id": mid, "name": mid})
+        elif provider == "gemini":
+            items = data.get("models") if isinstance(data, dict) else []
+            if isinstance(items, list):
+                for x in items:
+                    if not isinstance(x, dict):
+                        continue
+                    raw_name = str(x.get("name") or "").strip()
+                    mid = raw_name.replace("models/", "", 1) if raw_name.startswith("models/") else raw_name
+                    if not mid:
+                        continue
+                    display = str(x.get("displayName") or mid).strip()
+                    models.append({"id": mid, "name": display})
+
+        dedup = {}
+        for m in models:
+            dedup[m["id"].casefold()] = m
+        out = sorted(dedup.values(), key=lambda x: x["id"])
+
+        return {
+            "provider": provider,
+            "docs_url": p["docs"],
+            "count": len(out),
+            "models": out,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{provider}: {str(e)[:240]}")
 
 
 @app.post("/api/internal/classify")

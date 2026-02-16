@@ -62,3 +62,9 @@ class LLMModelsBulkTestRequest(BaseModel):
     model_ids: list[str] = Field(default_factory=list)
     limit: int = 20
     timeout_s: float | None = None
+
+
+class ProviderModelsRequest(BaseModel):
+    provider: str = Field(min_length=2)
+    api_key: str = ""
+    base_url: str = ""

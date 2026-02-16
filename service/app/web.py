@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlmodel import select
 
 from .config import settings
@@ -571,6 +572,34 @@ def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_aut
     now_msk = datetime.now(MSK_TZ)
     day_start_msk = now_msk.replace(hour=0, minute=0, second=0, microsecond=0)
     day_start_utc = day_start_msk.astimezone(timezone.utc)
+    week_cutoff_utc = (now_msk - timedelta(days=7)).astimezone(timezone.utc)
+    month_cutoff_utc = (now_msk - timedelta(days=30)).astimezone(timezone.utc)
+
+    total_messages = db.exec(select(func.count()).select_from(TgMonitorEvent)).one() or 0
+    leads_day = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= day_start_utc, TgMonitorEvent.is_lead == True)  # noqa: E712
+        ).one()
+        or 0
+    )
+    leads_week = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= week_cutoff_utc, TgMonitorEvent.is_lead == True)  # noqa: E712
+        ).one()
+        or 0
+    )
+    leads_month = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= month_cutoff_utc, TgMonitorEvent.is_lead == True)  # noqa: E712
+        ).one()
+        or 0
+    )
 
     added_today = len(
         db.exec(select(DiscoveryTarget).where(DiscoveryTarget.created_at >= day_start_utc)).all()
@@ -602,6 +631,10 @@ def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_aut
             "cfg": cfg,
             "rows": rows,
             "stats": {
+                "total_messages": int(total_messages),
+                "leads_day": int(leads_day),
+                "leads_week": int(leads_week),
+                "leads_month": int(leads_month),
                 "added_today": added_today,
                 "joins_today": joins_today,
                 "leaves_today": leaves_today,

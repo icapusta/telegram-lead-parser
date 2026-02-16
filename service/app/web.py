@@ -14,7 +14,7 @@ from sqlmodel import select
 from .config import settings
 from .db import init_db, session
 from .models import TgMonitorEvent, EventStatus, AppSettings
-from .schemas import TgMonitorPayload
+from .schemas import TgMonitorPayload, InternalClassifyRequest, InternalClassifyResponse
 from .filtering import hard_filter
 from .llm import classify, suggest_stopwords
 from .notify import send_event_notification, utcnow
@@ -131,6 +131,50 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "keywords_text": cfg.keywords_text,
         "stopwords_text": cfg.stopwords_text,
     }
+
+
+@app.post("/api/internal/classify")
+async def internal_classify(req: InternalClassifyRequest, db=Depends(_db), _it=Depends(_require_internal_token)) -> InternalClassifyResponse:
+    """
+    Synchronous internal classify endpoint for trusted agents (e.g. tg-agent discovery probing).
+    Does NOT write events to DB.
+    """
+    cfg = _get_settings(db)
+    hf = hard_filter(
+        text=req.text,
+        keywords_enabled=cfg.keywords_enabled,
+        stopwords_enabled=cfg.stopwords_enabled,
+        keywords_text=cfg.keywords_text,
+        stopwords_text=cfg.stopwords_text,
+    )
+    if not hf.passed:
+        return InternalClassifyResponse(
+            passed_hard_filter=False,
+            hard_filter_reason=hf.reason,
+            is_lead=False,
+            summary=f"hard_filter:{hf.reason}",
+            confidence=None,
+            model_used="hard-filter",
+        )
+    if not cfg.llm_enabled:
+        return InternalClassifyResponse(
+            passed_hard_filter=True,
+            hard_filter_reason="ok",
+            is_lead=False,
+            summary="llm_disabled",
+            confidence=None,
+            model_used="hard-filter",
+        )
+
+    res, model_used = await classify(req.text)
+    return InternalClassifyResponse(
+        passed_hard_filter=True,
+        hard_filter_reason="ok",
+        is_lead=bool(res.is_lead),
+        summary=res.summary,
+        confidence=res.confidence,
+        model_used=model_used,
+    )
 
 
 async def process_event(event_id: int) -> None:

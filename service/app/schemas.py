@@ -19,3 +19,16 @@ class LLMResult(BaseModel):
     is_lead: bool
     summary: str
     confidence: float | None = None
+
+
+class InternalClassifyRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class InternalClassifyResponse(BaseModel):
+    passed_hard_filter: bool
+    hard_filter_reason: str
+    is_lead: bool
+    summary: str
+    confidence: float | None = None
+    model_used: str

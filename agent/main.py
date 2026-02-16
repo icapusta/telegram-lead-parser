@@ -124,6 +124,7 @@ SESSION_PATH = os.environ.get("TG_SESSION_PATH", "/data/monitor_session")
 
 PARSER_INGEST_URL = os.environ.get("PARSER_INGEST_URL", "http://parser-service:8080/api/ingest/tg-monitor")
 PARSER_INTERNAL_SETTINGS_URL = os.environ.get("PARSER_INTERNAL_SETTINGS_URL", "http://parser-service:8080/api/internal/settings")
+PARSER_INTERNAL_CLASSIFY_URL = os.environ.get("PARSER_INTERNAL_CLASSIFY_URL", "http://parser-service:8080/api/internal/classify")
 PARSER_INTERNAL_TOKEN = os.environ.get("PARSER_INTERNAL_TOKEN", "")
 
 BUSINESS_FOLDER_QUERY = os.environ.get("BUSINESS_FOLDER_QUERY", "бизнес").casefold()
@@ -134,6 +135,7 @@ DISCOVERY_INTERVAL_S = float(os.environ.get("DISCOVERY_INTERVAL_S", "1800"))  # 
 
 SCAN_DAYS = env_int("SCAN_DAYS", 30)
 SCAN_MAX_MESSAGES = env_int("SCAN_MAX_MESSAGES", 300)
+SCAN_LLM_SAMPLE = env_int("SCAN_LLM_SAMPLE", 12)
 
 JOIN_PER_DAY = env_int("JOIN_PER_DAY", 8)
 JOIN_PER_HOUR = env_int("JOIN_PER_HOUR", 2)
@@ -230,6 +232,37 @@ async def _add_to_business(peer) -> bool:
     return True
 
 
+async def _remove_from_business(peer) -> bool:
+    bf = await _get_business_filter()
+    if not bf:
+        return False
+    fid, flt = bf
+    include = list(getattr(flt, "include_peers", []) or [])
+    pid = utils.get_peer_id(peer)
+    kept = [p for p in include if utils.get_peer_id(p) != pid]
+    if len(kept) == len(include):
+        return True
+
+    new_filter = types.DialogFilter(
+        title=flt.title,
+        pinned_peers=getattr(flt, "pinned_peers", None),
+        include_peers=kept,
+        exclude_peers=getattr(flt, "exclude_peers", None),
+        groups=getattr(flt, "groups", None),
+        broadcasts=getattr(flt, "broadcasts", None),
+        bots=getattr(flt, "bots", None),
+        contacts=getattr(flt, "contacts", None),
+        non_contacts=getattr(flt, "non_contacts", None),
+        exclude_muted=getattr(flt, "exclude_muted", None),
+        exclude_read=getattr(flt, "exclude_read", None),
+        exclude_archived=getattr(flt, "exclude_archived", None),
+        emoticon=getattr(flt, "emoticon", None),
+        color=getattr(flt, "color", None),
+    )
+    await client(functions.messages.UpdateDialogFilterRequest(id=fid, filter=new_filter))
+    return True
+
+
 def _extract_invite_hash(url: str) -> str | None:
     u = (url or "").strip()
     m = re.search(r"t\\.me/(?:joinchat/|\\+)([A-Za-z0-9_-]+)", u)
@@ -268,13 +301,23 @@ async def _fetch_filter_config() -> FilterConfig:
     )
 
 
-async def _scan_recent_messages(entity, cfg: FilterConfig) -> int:
+async def _internal_classify_text(h: httpx.AsyncClient, text: str) -> bool:
+    headers = {"x-internal-token": PARSER_INTERNAL_TOKEN} if PARSER_INTERNAL_TOKEN else {}
+    r = await h.post(PARSER_INTERNAL_CLASSIFY_URL, headers=headers, json={"text": text}, timeout=30.0)
+    r.raise_for_status()
+    data = r.json()
+    return bool(data.get("is_lead", False))
+
+
+async def _scan_recent_messages(entity, cfg: FilterConfig) -> tuple[int, int]:
     cutoff = utcnow() - timedelta(days=SCAN_DAYS)
-    candidates = 0
+    hard_candidates = 0
+    llm_positive = 0
     chat = await client.get_entity(entity)
     chat_username = getattr(chat, "username", None) or ""
     chat_peer_id = utils.get_peer_id(chat)
     clean_id = str(chat_peer_id).replace("-100", "")
+    sampled_texts: list[str] = []
 
     async for msg in client.iter_messages(entity, offset_date=cutoff, limit=SCAN_MAX_MESSAGES):
         if not getattr(msg, "message", None):
@@ -282,7 +325,9 @@ async def _scan_recent_messages(entity, cfg: FilterConfig) -> int:
         ok, _reason = hard_pass(cfg, msg.message)
         if not ok:
             continue
-        candidates += 1
+        hard_candidates += 1
+        if len(sampled_texts) < SCAN_LLM_SAMPLE:
+            sampled_texts.append(msg.message)
         # Push into parser-service for full LLM decision + bot notify.
         try:
             title = getattr(chat, "title", "") or chat_username or "Unknown"
@@ -302,10 +347,20 @@ async def _scan_recent_messages(entity, cfg: FilterConfig) -> int:
             requests.post(PARSER_INGEST_URL, json=payload, timeout=10)
         except Exception:
             pass
-        # Keep it small; we only need a signal.
-        if candidates >= 12:
-            break
-    return candidates
+
+    # LLM-backed stay/leave signal: stay only if we found at least one lead in sampled history.
+    if sampled_texts:
+        async with httpx.AsyncClient() as h:
+            for t in sampled_texts:
+                try:
+                    if await _internal_classify_text(h, t):
+                        llm_positive += 1
+                        break
+                except Exception:
+                    # Ignore single-sample failures; decision remains conservative.
+                    continue
+
+    return hard_candidates, llm_positive
 
 
 async def discovery_loop() -> None:
@@ -374,13 +429,22 @@ async def discovery_loop() -> None:
                     except Exception:
                         pass
 
-                    # Scan last N days; if no candidates, optionally leave.
+                    # Scan last N days; if LLM found no leads, optionally leave.
                     try:
-                        cands = await _scan_recent_messages(ch, cfg)
-                        if AUTO_LEAVE_IF_NO_CANDIDATES and cands == 0:
+                        hard_cands, llm_cands = await _scan_recent_messages(ch, cfg)
+                        print(
+                            f"scan @{username}: hard_candidates={hard_cands}, llm_candidates={llm_cands}",
+                            flush=True,
+                        )
+                        if AUTO_LEAVE_IF_NO_CANDIDATES and llm_cands == 0:
                             try:
                                 await client(functions.channels.LeaveChannelRequest(channel=ch))
-                                print(f"left @{username} (no candidates)", flush=True)
+                                try:
+                                    peer = await client.get_input_entity(ch)
+                                    await _remove_from_business(peer)
+                                except Exception:
+                                    pass
+                                print(f"left @{username} (no llm candidates)", flush=True)
                             except Exception:
                                 pass
                     except Exception:

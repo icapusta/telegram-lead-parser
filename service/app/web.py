@@ -15,7 +15,7 @@ from sqlmodel import select
 
 from .config import settings
 from .db import init_db, session
-from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog, DiscoveryTarget
+from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog, DiscoveryTarget, LLMModelStat
 from .schemas import (
     TgMonitorPayload,
     InternalClassifyRequest,
@@ -373,6 +373,44 @@ def _llm_opts(cfg: AppSettings) -> LLMRoutingOptions:
     )
 
 
+def _utc_day_key(dt: datetime | None = None) -> str:
+    now = dt or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _upsert_llm_model_stat(db, *, model_id: str, probe: dict, success: bool) -> None:
+    mid = (model_id or "").strip()
+    if not mid:
+        return
+    day = _utc_day_key()
+    row = db.exec(
+        select(LLMModelStat).where(
+            LLMModelStat.day_utc == day,
+            LLMModelStat.model_id == mid,
+        )
+    ).first()
+    if not row:
+        row = LLMModelStat(day_utc=day, model_id=mid)
+
+    usage = probe.get("usage") or {}
+    row.calls_ok += 1 if success else 0
+    row.calls_error += 0 if success else 1
+    row.prompt_tokens += int(usage.get("prompt_tokens") or 0)
+    row.completion_tokens += int(usage.get("completion_tokens") or 0)
+    row.total_tokens += int(usage.get("total_tokens") or 0)
+    row.last_http_status = int(probe.get("status_code") or row.last_http_status or 0)
+    row.last_latency_ms = int(probe.get("latency_ms") or row.last_latency_ms or 0)
+    row.last_provider_status = str(probe.get("provider_status") or row.last_provider_status or "")[:80]
+    row.last_reset_in_sec = int(probe.get("reset_in_sec") or row.last_reset_in_sec or 0)
+    row.last_rate_limits_json = json.dumps(probe.get("rate_limits") or {}, ensure_ascii=False)
+    row.last_error = str(probe.get("error") or "")[:500]
+    row.updated_at = utcnow()
+    db.add(row)
+    db.commit()
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "ts": datetime.utcnow().isoformat() + "Z"}
@@ -445,6 +483,9 @@ async def llm_models(db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict
     cfg = _get_settings(db)
     preferred = [x.strip() for x in (cfg.llm_model_priority_text or "").splitlines() if x.strip()]
     preferred_set = {x.casefold() for x in preferred}
+    day = _utc_day_key()
+    stats_rows = db.exec(select(LLMModelStat).where(LLMModelStat.day_utc == day)).all()
+    stats_by_model = {r.model_id.casefold(): r for r in stats_rows}
     async with httpx.AsyncClient() as client:
         models = await list_models(client)
     out: list[dict] = []
@@ -454,6 +495,13 @@ async def llm_models(db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict
             owned_by=m.owned_by,
             exclude_openai_owned_models=bool(cfg.exclude_openai_owned_models),
         )
+        st = stats_by_model.get((m.id or "").casefold())
+        rl = {}
+        if st and (st.last_rate_limits_json or "").strip():
+            try:
+                rl = json.loads(st.last_rate_limits_json)
+            except Exception:
+                rl = {}
         out.append(
             {
                 "id": m.id,
@@ -461,6 +509,17 @@ async def llm_models(db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict
                 "allowed": br is None,
                 "block_reason": br or "",
                 "in_priority": m.id.casefold() in preferred_set,
+                "calls_ok_today": int(st.calls_ok) if st else 0,
+                "calls_error_today": int(st.calls_error) if st else 0,
+                "tokens_total_today": int(st.total_tokens) if st else 0,
+                "tokens_prompt_today": int(st.prompt_tokens) if st else 0,
+                "tokens_completion_today": int(st.completion_tokens) if st else 0,
+                "last_http_status": int(st.last_http_status) if st else 0,
+                "last_latency_ms": int(st.last_latency_ms) if st else 0,
+                "last_provider_status": st.last_provider_status if st else "",
+                "last_reset_in_sec": int(st.last_reset_in_sec) if st else 0,
+                "last_rate_limits": rl,
+                "last_error": st.last_error if st else "",
             }
         )
     return out
@@ -471,7 +530,14 @@ async def llm_test_model(req: LLMModelTestRequest, db=Depends(_db), _auth=Depend
     cfg = _get_settings(db)
     timeout_s = float(req.timeout_s if req.timeout_s is not None else cfg.llm_timeout_s)
     timeout_s = max(3.0, min(90.0, timeout_s))
-    return await test_model_availability(model_id=req.model_id.strip(), timeout_s=timeout_s)
+    res = await test_model_availability(model_id=req.model_id.strip(), timeout_s=timeout_s)
+    _upsert_llm_model_stat(
+        db,
+        model_id=req.model_id.strip(),
+        probe=res,
+        success=bool(res.get("ok")),
+    )
+    return res
 
 
 @app.post("/api/llm/test-models")
@@ -496,6 +562,13 @@ async def llm_test_models(req: LLMModelsBulkTestRequest, db=Depends(_db), _auth=
             return await test_model_availability(model_id=mid, timeout_s=timeout_s)
 
     results = await asyncio.gather(*[_one(mid) for mid in model_ids])
+    for r in results:
+        _upsert_llm_model_stat(
+            db,
+            model_id=str(r.get("model_id") or ""),
+            probe=r,
+            success=bool(r.get("ok")),
+        )
     return {"results": results}
 
 
@@ -542,7 +615,8 @@ async def internal_classify(req: InternalClassifyRequest, db=Depends(_db), _it=D
             model_used="hard-filter",
         )
 
-    res, model_used = await classify(req.text, options=_llm_opts(cfg))
+    res, model_used, meta = await classify(req.text, options=_llm_opts(cfg))
+    _upsert_llm_model_stat(db, model_id=model_used, probe=meta, success=True)
     return InternalClassifyResponse(
         passed_hard_filter=True,
         hard_filter_reason="ok",
@@ -607,13 +681,14 @@ async def process_event(event_id: int) -> None:
                 db.commit()
                 return
 
-            res, model_used = await classify(ev.text, options=_llm_opts(cfg))
+            res, model_used, meta = await classify(ev.text, options=_llm_opts(cfg))
             ev.is_lead = res.is_lead
             ev.summary = res.summary
             ev.confidence = res.confidence
             ev.model_used = model_used
             ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
             ev.status = EventStatus.done
+            _upsert_llm_model_stat(db, model_id=model_used, probe=meta, success=True)
 
             if res.is_lead or settings.tg_notify_all:
                 excerpt = (ev.text or "").strip().replace("\n", " ")[:240]

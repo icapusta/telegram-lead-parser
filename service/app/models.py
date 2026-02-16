@@ -130,3 +130,26 @@ class DiscoveryTarget(SQLModel, table=True):
     note: str = ""
     queued_join_scan: bool = Field(default=False, index=True)
     queued_at: Optional[datetime] = None
+
+
+class LLMModelStat(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+    # YYYY-MM-DD in UTC; enough for per-day aggregates.
+    day_utc: str = Field(default="", index=True)
+    model_id: str = Field(default="", index=True)
+
+    calls_ok: int = Field(default=0)
+    calls_error: int = Field(default=0)
+    prompt_tokens: int = Field(default=0)
+    completion_tokens: int = Field(default=0)
+    total_tokens: int = Field(default=0)
+
+    last_http_status: int = Field(default=0)
+    last_latency_ms: int = Field(default=0)
+    last_provider_status: str = ""
+    last_reset_in_sec: int = Field(default=0)
+    last_rate_limits_json: str = "{}"
+    last_error: str = ""

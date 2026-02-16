@@ -86,6 +86,30 @@ def _migrate_sqlite() -> None:
                 if "queued_at" not in tgt_cols:
                     stmts.append("ALTER TABLE discoverytarget ADD COLUMN queued_at DATETIME")
 
+            # New table for local per-model LLM usage/limits stats.
+            conn.exec_driver_sql(
+                """
+                CREATE TABLE IF NOT EXISTS llmmodelstat (
+                    id INTEGER PRIMARY KEY,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    day_utc VARCHAR DEFAULT '',
+                    model_id VARCHAR DEFAULT '',
+                    calls_ok INTEGER DEFAULT 0,
+                    calls_error INTEGER DEFAULT 0,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    total_tokens INTEGER DEFAULT 0,
+                    last_http_status INTEGER DEFAULT 0,
+                    last_latency_ms INTEGER DEFAULT 0,
+                    last_provider_status VARCHAR DEFAULT '',
+                    last_reset_in_sec INTEGER DEFAULT 0,
+                    last_rate_limits_json VARCHAR DEFAULT '{}',
+                    last_error VARCHAR DEFAULT ''
+                )
+                """
+            )
+
             for st in stmts:
                 conn.exec_driver_sql(st)
     except Exception:

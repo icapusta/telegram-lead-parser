@@ -26,6 +26,38 @@ class LLMRoutingOptions:
     models_config_json: str | None = None
 
 
+def _extract_usage(data: dict) -> dict[str, int]:
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    return {
+        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "total_tokens": int(usage.get("total_tokens") or 0),
+    }
+
+
+def _extract_provider_error(data: dict, fallback: str = "") -> tuple[str, str]:
+    # Returns (message, provider_status), if present.
+    if not isinstance(data, dict):
+        return fallback, ""
+    err = data.get("error")
+    if isinstance(err, dict):
+        msg = str(err.get("message") or fallback or "")
+        details = err.get("details")
+        provider_status = ""
+        if isinstance(details, list):
+            for d in details:
+                if isinstance(d, dict) and d.get("@type", "").endswith("ErrorInfo"):
+                    provider_status = str(d.get("metadata", {}).get("status") or "")
+                    break
+        provider_status = provider_status or str(err.get("status") or "")
+        return msg, provider_status
+    if isinstance(err, str):
+        return err, ""
+    return fallback, ""
+
+
 def _normalize_model_id(model_id: str) -> str:
     return model_id.strip()
 
@@ -254,7 +286,7 @@ def _extract_content_text(data: dict) -> str:
     return ""
 
 
-async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple[LLMResult, str]:
+async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple[LLMResult, str, dict]:
     if not settings.cliproxy_base_url:
         raise RuntimeError("cliproxy_base_url is not set")
     if not settings.cliproxy_api_key:
@@ -294,8 +326,9 @@ async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple
                         timeout_eff = max(3.0, min(120.0, float(cfg.get("timeout_s"))))
                 except Exception:
                     timeout_eff = timeout_s
-                res = await _chat_completions(client, mid, prompt, timeout_s=timeout_eff)
-                return res, mid
+                res, meta = await _chat_completions(client, mid, prompt, timeout_s=timeout_eff)
+                meta["model_id"] = mid
+                return res, mid, meta
             except Exception as e:
                 last_err = e
                 continue
@@ -303,7 +336,9 @@ async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple
         raise RuntimeError(f"all model attempts failed: {last_err}") from last_err
 
 
-async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str, *, timeout_s: float) -> LLMResult:
+async def _chat_completions(
+    client: httpx.AsyncClient, model: str, prompt: str, *, timeout_s: float
+) -> tuple[LLMResult, dict]:
     base = settings.cliproxy_base_url.rstrip("/")
     headers = _auth_headers()
 
@@ -325,13 +360,28 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str, 
     for url, body in attempts:
         try:
             r = await client.post(url, headers=headers, json=body, timeout=timeout_s)
-            r.raise_for_status()
-            data = r.json()
+            try:
+                data = r.json()
+            except Exception:
+                data = {}
+            if r.status_code >= 400:
+                msg, provider_status = _extract_provider_error(data, fallback=r.text[:240])
+                raise RuntimeError(
+                    f"http={r.status_code}; provider_status={provider_status or '-'}; error={msg or 'unknown'}"
+                )
             content = _extract_content_text(data)
             parsed = _try_parse_json(content or "")
             if not parsed:
                 raise RuntimeError(f"failed to parse model output: {(content or '')[:200]}")
-            return LLMResult.model_validate(parsed)
+            meta = {
+                "status_code": int(r.status_code),
+                "rate_limits": extract_rate_limit_headers(r.headers),
+                "usage": _extract_usage(data),
+                "error": "",
+                "provider_status": "",
+                "reset_in_sec": int((extract_rate_limit_headers(r.headers).get("retry-after") or 0) or 0),
+            }
+            return LLMResult.model_validate(parsed), meta
         except Exception as e:
             last_err = e
             continue
@@ -538,13 +588,28 @@ async def test_model_availability(
         except Exception:
             payload = None
         content = _extract_content_text(payload or {}) if payload else ""
+        err_msg = ""
+        provider_status = ""
+        if r.status_code >= 400:
+            msg, ps = _extract_provider_error(payload or {}, fallback=(content or r.text[:240]))
+            err_msg = msg
+            provider_status = ps
+        reset_in_sec = 0
+        try:
+            reset_in_sec = int(rate_headers.get("retry-after") or 0)
+        except Exception:
+            reset_in_sec = 0
+        usage = _extract_usage(payload or {})
         return {
             "model_id": model_id,
             "ok": bool(r.status_code < 400),
             "status_code": int(r.status_code),
             "latency_ms": latency_ms,
-            "error": "" if r.status_code < 400 else (content[:240] if content else r.text[:240]),
+            "error": "" if r.status_code < 400 else (err_msg[:240] if err_msg else (content[:240] if content else r.text[:240])),
             "rate_limits": rate_headers,
+            "provider_status": provider_status,
+            "reset_in_sec": reset_in_sec,
+            "usage": usage,
         }
     except Exception as e:
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -555,4 +620,7 @@ async def test_model_availability(
             "latency_ms": latency_ms,
             "error": str(e)[:240],
             "rate_limits": {},
+            "provider_status": "",
+            "reset_in_sec": 0,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }

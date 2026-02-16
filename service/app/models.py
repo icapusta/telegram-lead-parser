@@ -108,3 +108,5 @@ class DiscoveryTarget(SQLModel, table=True):
     # Last known status: discovered | joined | left | kept | failed
     status: str = Field(default="discovered", index=True)
     note: str = ""
+    queued_join_scan: bool = Field(default=False, index=True)
+    queued_at: Optional[datetime] = None

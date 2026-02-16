@@ -145,6 +145,7 @@ PARSER_INTERNAL_SETTINGS_URL = os.environ.get("PARSER_INTERNAL_SETTINGS_URL", "h
 PARSER_INTERNAL_CLASSIFY_URL = os.environ.get("PARSER_INTERNAL_CLASSIFY_URL", "http://parser-service:8080/api/internal/classify")
 PARSER_INTERNAL_DISCOVERY_LOG_URL = os.environ.get("PARSER_INTERNAL_DISCOVERY_LOG_URL", "http://parser-service:8080/api/internal/discovery/log")
 PARSER_INTERNAL_DISCOVERY_TARGET_URL = os.environ.get("PARSER_INTERNAL_DISCOVERY_TARGET_URL", "http://parser-service:8080/api/internal/discovery/target")
+PARSER_INTERNAL_DISCOVERY_PENDING_URL = os.environ.get("PARSER_INTERNAL_DISCOVERY_PENDING_URL", "http://parser-service:8080/api/internal/discovery/targets/pending")
 PARSER_INTERNAL_TOKEN = os.environ.get("PARSER_INTERNAL_TOKEN", "")
 
 BUSINESS_FOLDER_QUERY = os.environ.get("BUSINESS_FOLDER_QUERY", "бизнес").casefold()
@@ -450,6 +451,7 @@ async def _save_discovery_target(
     query: str,
     status: str,
     note: str = "",
+    queued_join_scan: bool | None = None,
 ) -> bool | None:
     """
     Upsert target in parser-service.
@@ -468,6 +470,8 @@ async def _save_discovery_target(
         "status": status,
         "note": note,
     }
+    if queued_join_scan is not None:
+        body["queued_join_scan"] = bool(queued_join_scan)
     try:
         async with httpx.AsyncClient() as h:
             r = await h.post(PARSER_INTERNAL_DISCOVERY_TARGET_URL, headers=headers, json=body, timeout=8.0)
@@ -476,6 +480,20 @@ async def _save_discovery_target(
             return bool(data.get("created"))
     except Exception:
         return None
+
+
+async def _fetch_pending_targets(limit: int = 100) -> list[dict]:
+    headers = {"x-internal-token": PARSER_INTERNAL_TOKEN} if PARSER_INTERNAL_TOKEN else {}
+    try:
+        async with httpx.AsyncClient() as h:
+            r = await h.get(PARSER_INTERNAL_DISCOVERY_PENDING_URL, headers=headers, params={"limit": limit}, timeout=10.0)
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list):
+                return data
+            return []
+    except Exception:
+        return []
 
 
 async def _fetch_runtime_config() -> tuple[FilterConfig, DiscoveryConfig]:
@@ -663,6 +681,113 @@ async def _post_join_flow(
         )
 
 
+async def _process_pending_targets(cfg: FilterConfig, dcfg: DiscoveryConfig, budget: JoinBudget, state: AgentState) -> None:
+    pending = await _fetch_pending_targets(limit=100)
+    if not pending:
+        return
+    await _log("info", "pending_queue", f"targets={len(pending)}")
+
+    for row in pending:
+        target_key = (row.get("target_key") or "").strip().casefold()
+        target = (row.get("target") or "").strip()
+        username = (row.get("username") or "").strip()
+        source = (row.get("source") or "manual").strip() or "manual"
+        query = (row.get("query") or "manual_queue").strip() or "manual_queue"
+        display_name = ("@" + username) if username else (target or target_key)
+
+        # If no valid target, mark failed and dequeue.
+        if not target and not username:
+            await _save_discovery_target(
+                target_key=target_key,
+                target=target,
+                username=username,
+                source=source,
+                query=query,
+                status="failed",
+                note="invalid_target",
+                queued_join_scan=False,
+            )
+            await _log("warn", "pending_invalid", "empty target", chat_username=display_name, query=query)
+            continue
+
+        can, why = budget.can_join()
+        if not can:
+            await _log("warn", "budget_block", why, chat_username=display_name, query=query)
+            # Keep queued for next tick.
+            continue
+
+        join_target = target or ("@" + username)
+        try:
+            await _log("info", "join_try", "joining from pending queue", chat_username=display_name, query=query)
+            joined = await _join_target(join_target)
+            budget.mark_join()
+            await _log("info", "join_ok", "joined from pending queue", chat_username=display_name, query=query)
+        except UserAlreadyParticipantError:
+            await _log("info", "join_ok", "already_participant pending", chat_username=display_name, query=query)
+            try:
+                joined = await client.get_entity(username or join_target)
+            except Exception:
+                joined = None
+        except Exception as e:
+            await _log("error", "join_failed", str(e), chat_username=display_name, query=query)
+            await _save_discovery_target(
+                target_key=target_key,
+                target=target,
+                username=username,
+                source=source,
+                query=query,
+                status="failed",
+                note=f"join_failed:{str(e)[:120]}",
+                queued_join_scan=False,
+            )
+            continue
+
+        channel_entity = None
+        if isinstance(joined, types.Channel):
+            channel_entity = joined
+        else:
+            try:
+                channel_entity = await client.get_entity(username or join_target)
+            except Exception:
+                channel_entity = None
+
+        if not isinstance(channel_entity, types.Channel):
+            await _log("warn", "skip_non_channel", "pending target is not channel/group", chat_username=display_name, query=query)
+            await _save_discovery_target(
+                target_key=target_key,
+                target=target,
+                username=username,
+                source=source,
+                query=query,
+                status="failed",
+                note="not_channel",
+                queued_join_scan=False,
+            )
+            continue
+
+        await _post_join_flow(
+            channel_entity,
+            cfg=cfg,
+            dcfg=dcfg,
+            username_for_log=display_name,
+            query=query,
+            source=source,
+            target=target or ("@" + username),
+            target_key=target_key,
+        )
+        # Always dequeue after attempt.
+        await _save_discovery_target(
+            target_key=target_key,
+            target=target or ("@" + username),
+            username=username,
+            source=source,
+            query=query,
+            status="",
+            note="",
+            queued_join_scan=False,
+        )
+
+
 async def discovery_loop() -> None:
     budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=DEFAULT_JOIN_PER_DAY, per_hour=DEFAULT_JOIN_PER_HOUR)
     search_budget = JoinBudget(path=SEARCH_BUDGET_PATH, per_day=DEFAULT_SEARCH_REQUESTS_PER_DAY, per_hour=DEFAULT_SEARCH_REQUESTS_PER_HOUR)
@@ -679,6 +804,7 @@ async def discovery_loop() -> None:
                 await asyncio.sleep(30)
                 continue
 
+            await _process_pending_targets(cfg, dcfg, budget, state)
             await _log("info", "tick", f"queries={len(dcfg.queries)} interval={int(dcfg.interval_s)}s")
             processed_queries = 0
             for q in dcfg.queries:

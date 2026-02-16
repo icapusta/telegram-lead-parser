@@ -68,6 +68,14 @@ def _migrate_sqlite() -> None:
             if "search_results_per_query" not in app_cols:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN search_results_per_query INTEGER DEFAULT 20")
 
+            tgt_res = conn.exec_driver_sql("PRAGMA table_info(discoverytarget)").fetchall()
+            tgt_cols = {r[1] for r in (tgt_res or [])}
+            if tgt_cols:
+                if "queued_join_scan" not in tgt_cols:
+                    stmts.append("ALTER TABLE discoverytarget ADD COLUMN queued_join_scan BOOLEAN DEFAULT 0")
+                if "queued_at" not in tgt_cols:
+                    stmts.append("ALTER TABLE discoverytarget ADD COLUMN queued_at DATETIME")
+
             for st in stmts:
                 conn.exec_driver_sql(st)
     except Exception:

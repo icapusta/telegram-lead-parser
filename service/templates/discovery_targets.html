@@ -46,6 +46,7 @@
       .brand h1 { margin:0; font-size:18px; }
       .brand a { color:var(--accent); text-decoration:none; font-size:12px; }
       .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; }
+      .btn[disabled] { opacity: 0.65; cursor: not-allowed; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
       table { width:100%; border-collapse:collapse; }
       th, td { padding:8px; border-bottom:1px solid var(--border); font-size:12px; text-align:left; vertical-align:top; }
@@ -72,19 +73,22 @@
       </div>
 
       <div class="card">
-        <div class="small" style="margin-bottom:10px;">Найденные сообщества (с дедупликацией по target_key)</div>
+        <div class="small" style="margin-bottom:10px;">Найденные сообщества (без дублей по target_key)</div>
         <table>
           <thead>
             <tr>
               <th>Updated</th>
               <th>Status</th>
               <th>Вступал</th>
+              <th>Результат проверки</th>
+              <th>Очередь</th>
               <th>Source</th>
               <th>Target</th>
               <th>Username</th>
               <th>Query</th>
               <th>Note</th>
               <th>Key</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -102,9 +106,29 @@
               </td>
               <td>
                 {% if r.status in ["joined", "kept", "left"] %}
-                  <span class="pill good">yes</span>
+                  <span class="pill good">да</span>
                 {% else %}
-                  <span class="pill warn">no</span>
+                  <span class="pill warn">нет</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.status == "left" and r.note == "no_llm_candidates" %}
+                  <span class="pill bad">вакансий не найдено</span>
+                {% elif r.status == "kept" %}
+                  <span class="pill good">найдены сигналы вакансий</span>
+                {% elif r.status == "joined" %}
+                  <span class="pill warn">в процессе проверки</span>
+                {% elif r.status == "failed" %}
+                  <span class="pill bad">ошибка обработки</span>
+                {% else %}
+                  <span class="pill">{{ r.note or "-" }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.queued_join_scan %}
+                  <span class="pill warn">queued</span>
+                {% else %}
+                  <span class="pill">-</span>
                 {% endif %}
               </td>
               <td>{{ r.source }}</td>
@@ -119,6 +143,15 @@
               <td>{{ r.query }}</td>
               <td>{{ r.note }}</td>
               <td class="mono">{{ r.target_key }}</td>
+              <td>
+                <form method="post" action="/discovery/targets/{{ r.id }}/queue">
+                  {% if r.queued_join_scan %}
+                    <button class="btn" type="submit" disabled>Уже в очереди</button>
+                  {% else %}
+                    <button class="btn" type="submit">Вступить и проверить</button>
+                  {% endif %}
+                </form>
+              </td>
             </tr>
             {% endfor %}
           </tbody>

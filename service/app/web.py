@@ -595,6 +595,21 @@ def discovery_targets_page(request: Request, db=Depends(_db), _auth=Depends(_req
     )
 
 
+@app.post("/discovery/targets/{target_id}/queue")
+def queue_discovery_target(target_id: int, db=Depends(_db), _auth=Depends(_require_auth)):
+    row = db.exec(select(DiscoveryTarget).where(DiscoveryTarget.id == target_id)).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    row.queued_join_scan = True
+    row.queued_at = utcnow()
+    row.status = "queued_join_scan"
+    row.note = "queued_by_user"
+    row.updated_at = utcnow()
+    db.add(row)
+    db.commit()
+    return RedirectResponse(url="/discovery/targets", status_code=303)
+
+
 @app.post("/settings")
 def update_settings(
     keywords_enabled: bool = Form(False),
@@ -687,6 +702,33 @@ def discovery_targets(limit: int = 500, db=Depends(_db), _auth=Depends(_require_
             "query": r.query,
             "status": r.status,
             "note": r.note,
+            "queued_join_scan": bool(r.queued_join_scan),
+            "queued_at": r.queued_at.isoformat() if r.queued_at else "",
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/internal/discovery/targets/pending")
+def internal_discovery_targets_pending(limit: int = 100, db=Depends(_db), _it=Depends(_require_internal_token)) -> list[dict]:
+    lim = min(max(int(limit or 100), 1), 1000)
+    rows = db.exec(
+        select(DiscoveryTarget)
+        .where(DiscoveryTarget.queued_join_scan == True)  # noqa: E712
+        .order_by(DiscoveryTarget.queued_at.asc(), DiscoveryTarget.updated_at.asc())
+        .limit(lim)
+    ).all()
+    return [
+        {
+            "id": r.id,
+            "target_key": r.target_key,
+            "target": r.target,
+            "username": r.username,
+            "source": r.source,
+            "query": r.query,
+            "status": r.status,
+            "note": r.note,
+            "queued_at": r.queued_at.isoformat() if r.queued_at else "",
         }
         for r in rows
     ]
@@ -729,6 +771,9 @@ def internal_discovery_target(req: InternalDiscoveryTargetRequest, db=Depends(_d
             row.status = (req.status or "")[:40]
         if req.note:
             row.note = (req.note or "")[:500]
+        if req.queued_join_scan is not None:
+            row.queued_join_scan = bool(req.queued_join_scan)
+            row.queued_at = utcnow() if row.queued_join_scan else None
         db.add(row)
         db.commit()
         return {"ok": True, "created": False, "id": row.id}
@@ -743,6 +788,8 @@ def internal_discovery_target(req: InternalDiscoveryTargetRequest, db=Depends(_d
         query=(req.query or "")[:200],
         status=(req.status or "discovered")[:40],
         note=(req.note or "")[:500],
+        queued_join_scan=bool(req.queued_join_scan) if req.queued_join_scan is not None else False,
+        queued_at=utcnow() if req.queued_join_scan else None,
     )
     db.add(row)
     db.commit()

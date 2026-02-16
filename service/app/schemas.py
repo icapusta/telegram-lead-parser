@@ -50,3 +50,4 @@ class InternalDiscoveryTargetRequest(BaseModel):
     query: str = ""
     status: str = "discovered"
     note: str = ""
+    queued_join_scan: bool | None = None

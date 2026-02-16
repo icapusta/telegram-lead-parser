@@ -317,6 +317,7 @@ async def discovery_loop() -> None:
                 await asyncio.sleep(30)
                 continue
 
+            print(f"discovery tick: queries={len(DISCOVERY_QUERIES)}", flush=True)
             cfg = await _fetch_filter_config()
             for q in DISCOVERY_QUERIES:
                 can, why = budget.can_join()

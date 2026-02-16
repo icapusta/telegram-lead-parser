@@ -665,11 +665,6 @@ async def discovery_loop() -> None:
 
             await _log("info", "tick", f"queries={len(dcfg.queries)} interval={int(dcfg.interval_s)}s")
             for q in dcfg.queries:
-                can, why = budget.can_join()
-                if not can:
-                    await _log("warn", "budget_block", why, query=q)
-                    break
-
                 # Telegram search for public groups/channels.
                 try:
                     res = await client(functions.contacts.SearchRequest(q=q, limit=20))
@@ -681,11 +676,6 @@ async def discovery_loop() -> None:
                 await _log("info", "search", f"found={len(chats)}", query=q)
                 # Prefer megagroups and channels with linked chats.
                 for ch in chats:
-                    can, why = budget.can_join()
-                    if not can:
-                        await _log("warn", "budget_block", why, query=q)
-                        break
-
                     if isinstance(ch, types.Channel):
                         is_megagroup = bool(getattr(ch, "megagroup", False))
                         has_linked = bool(getattr(ch, "linked_chat_id", None))
@@ -715,6 +705,12 @@ async def discovery_loop() -> None:
                         await _log("warn", "target_save_failed", "internal api failed", chat_username=f"@{username}", query=q)
                     if state.seen(username):
                         continue
+
+                    can, why = budget.can_join()
+                    if not can:
+                        await _log("warn", "budget_block", why, chat_username=f"@{username}", query=q)
+                        continue
+
                     state.mark_seen(username)
 
                     try:
@@ -767,11 +763,6 @@ async def discovery_loop() -> None:
                     await _log("info", "external_search", f"targets={len(uniq_targets)}", query=q)
 
                 for src, target in uniq_targets:
-                    can, why = budget.can_join()
-                    if not can:
-                        await _log("warn", "budget_block", why, query=q)
-                        break
-
                     tk = _target_key(target)
                     username = _extract_username_from_target(target) or ""
                     created = await _save_discovery_target(
@@ -790,6 +781,11 @@ async def discovery_loop() -> None:
                         await _log("warn", "target_save_failed", "internal api failed", chat_username=("@" + username) if username else target, query=q)
                     if state.seen_target(tk):
                         continue
+                    can, why = budget.can_join()
+                    if not can:
+                        await _log("warn", "budget_block", why, chat_username=("@" + username) if username else target, query=q)
+                        continue
+
                     state.mark_target(tk)
 
                     if username and state.seen(username):

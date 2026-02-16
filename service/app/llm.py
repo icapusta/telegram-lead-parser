@@ -17,6 +17,14 @@ class ModelInfo:
     owned_by: str | None = None
 
 
+@dataclass(frozen=True)
+class LLMRoutingOptions:
+    model_priority_text: str | None = None
+    llm_max_attempts: int | None = None
+    llm_timeout_s: float | None = None
+    exclude_openai_owned_models: bool | None = None
+
+
 def _normalize_model_id(model_id: str) -> str:
     return model_id.strip()
 
@@ -38,8 +46,19 @@ def _default_model_priority() -> list[str]:
     ]
 
 
-def _is_model_allowed(mi: ModelInfo) -> bool:
-    if settings.exclude_openai_owned_models and (mi.owned_by or "").lower() == "openai":
+def default_model_priority_text() -> str:
+    return "\n".join(_default_model_priority()) + "\n"
+
+
+def _parse_model_priority_text(raw: str | None) -> list[str]:
+    if not raw:
+        return _default_model_priority()
+    out = [x.strip() for x in raw.splitlines() if x.strip()]
+    return out or _default_model_priority()
+
+
+def _is_model_allowed(mi: ModelInfo, *, exclude_openai_owned_models: bool) -> bool:
+    if exclude_openai_owned_models and (mi.owned_by or "").lower() == "openai":
         return False
     # Hard blocklist: user requested never to use models tied to these accounts.
     mid = (mi.id or "").casefold()
@@ -66,20 +85,25 @@ def _preferred_match(available_id: str, preferred: str) -> bool:
     return False
 
 
-def _select_models(available: Iterable[ModelInfo]) -> list[str]:
+def _select_models(
+    available: Iterable[ModelInfo],
+    *,
+    preferred_models: list[str] | None = None,
+    exclude_openai_owned_models: bool,
+) -> list[str]:
     avail_list = list(available)
     avail_map = {m.id: m for m in avail_list}
     picked: list[str] = []
 
-    for mid in _default_model_priority():
+    for mid in (preferred_models or _default_model_priority()):
         # First exact hit.
         mi = avail_map.get(mid)
-        if mi and _is_model_allowed(mi):
+        if mi and _is_model_allowed(mi, exclude_openai_owned_models=exclude_openai_owned_models):
             picked.append(mi.id)
             continue
         # Then fuzzy match to tolerate provider suffix/prefix variants.
         for cand in avail_list:
-            if not _is_model_allowed(cand):
+            if not _is_model_allowed(cand, exclude_openai_owned_models=exclude_openai_owned_models):
                 continue
             if _preferred_match(cand.id, mid):
                 picked.append(cand.id)
@@ -88,7 +112,7 @@ def _select_models(available: Iterable[ModelInfo]) -> list[str]:
     # If our priority list doesn't intersect, fallback to anything allowed.
     if not picked:
         for mi in avail_list:
-            if _is_model_allowed(mi):
+            if _is_model_allowed(mi, exclude_openai_owned_models=exclude_openai_owned_models):
                 picked.append(mi.id)
                 if len(picked) >= 10:
                     break
@@ -191,24 +215,37 @@ def _extract_content_text(data: dict) -> str:
     return ""
 
 
-async def classify(text: str) -> tuple[LLMResult, str]:
+async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple[LLMResult, str]:
     if not settings.cliproxy_base_url:
         raise RuntimeError("cliproxy_base_url is not set")
     if not settings.cliproxy_api_key:
         raise RuntimeError("cliproxy_api_key is not set")
+    opts = options or LLMRoutingOptions()
+    preferred_models = _parse_model_priority_text(opts.model_priority_text)
+    max_attempts = max(1, int(opts.llm_max_attempts if opts.llm_max_attempts is not None else settings.llm_max_attempts))
+    timeout_s = float(opts.llm_timeout_s if opts.llm_timeout_s is not None else settings.llm_timeout_s)
+    exclude_openai_owned_models = (
+        bool(opts.exclude_openai_owned_models)
+        if opts.exclude_openai_owned_models is not None
+        else bool(settings.exclude_openai_owned_models)
+    )
 
     async with httpx.AsyncClient() as client:
         models = await list_models(client)
-        candidates = _select_models(models)
+        candidates = _select_models(
+            models,
+            preferred_models=preferred_models,
+            exclude_openai_owned_models=exclude_openai_owned_models,
+        )
         if not candidates:
             raise RuntimeError("no available models")
 
         prompt = _build_prompt(text)
         last_err: Exception | None = None
 
-        for mid in candidates[: settings.llm_max_attempts]:
+        for mid in candidates[:max_attempts]:
             try:
-                res = await _chat_completions(client, mid, prompt)
+                res = await _chat_completions(client, mid, prompt, timeout_s=timeout_s)
                 return res, mid
             except Exception as e:
                 last_err = e
@@ -217,7 +254,7 @@ async def classify(text: str) -> tuple[LLMResult, str]:
         raise RuntimeError(f"all model attempts failed: {last_err}") from last_err
 
 
-async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) -> LLMResult:
+async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str, *, timeout_s: float) -> LLMResult:
     base = settings.cliproxy_base_url.rstrip("/")
     headers = _auth_headers()
 
@@ -238,7 +275,7 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
     last_err: Exception | None = None
     for url, body in attempts:
         try:
-            r = await client.post(url, headers=headers, json=body, timeout=settings.llm_timeout_s)
+            r = await client.post(url, headers=headers, json=body, timeout=timeout_s)
             r.raise_for_status()
             data = r.json()
             content = _extract_content_text(data)
@@ -253,7 +290,12 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
     raise RuntimeError(f"llm endpoint attempts failed: {last_err}") from last_err
 
 
-async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple[list[str], str]:
+async def suggest_stopwords(
+    *,
+    text: str,
+    existing_stopwords_text: str,
+    options: LLMRoutingOptions | None = None,
+) -> tuple[list[str], str]:
     """
     Suggest additional stopwords/phrases (Russian) after a human marks a message as NOT a lead.
     Returns (stopwords, model_used).
@@ -262,6 +304,15 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
         raise RuntimeError("cliproxy_base_url is not set")
     if not settings.cliproxy_api_key:
         raise RuntimeError("cliproxy_api_key is not set")
+    opts = options or LLMRoutingOptions()
+    preferred_models = _parse_model_priority_text(opts.model_priority_text)
+    max_attempts = max(1, int(opts.llm_max_attempts if opts.llm_max_attempts is not None else settings.llm_max_attempts))
+    timeout_s = float(opts.llm_timeout_s if opts.llm_timeout_s is not None else settings.llm_timeout_s)
+    exclude_openai_owned_models = (
+        bool(opts.exclude_openai_owned_models)
+        if opts.exclude_openai_owned_models is not None
+        else bool(settings.exclude_openai_owned_models)
+    )
 
     existing = [x.strip() for x in (existing_stopwords_text or "").splitlines() if x.strip()]
     existing_preview = "\n".join(existing[:80])
@@ -280,12 +331,16 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
 
     async with httpx.AsyncClient() as client:
         models = await list_models(client)
-        candidates = _select_models(models)
+        candidates = _select_models(
+            models,
+            preferred_models=preferred_models,
+            exclude_openai_owned_models=exclude_openai_owned_models,
+        )
         if not candidates:
             raise RuntimeError("no available models")
 
         last_err: Exception | None = None
-        for mid in candidates[: settings.llm_max_attempts]:
+        for mid in candidates[:max_attempts]:
             try:
                 base = settings.cliproxy_base_url.rstrip("/")
                 chat_body = {
@@ -307,7 +362,7 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                 data = None
                 for url, body in attempts:
                     try:
-                        r = await client.post(url, headers=_auth_headers(), json=body, timeout=settings.llm_timeout_s)
+                        r = await client.post(url, headers=_auth_headers(), json=body, timeout=timeout_s)
                         r.raise_for_status()
                         data = r.json()
                         break

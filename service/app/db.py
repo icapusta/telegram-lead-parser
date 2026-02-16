@@ -67,6 +67,14 @@ def _migrate_sqlite() -> None:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN queries_per_tick INTEGER DEFAULT 25")
             if "search_results_per_query" not in app_cols:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN search_results_per_query INTEGER DEFAULT 20")
+            if "llm_model_priority_text" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN llm_model_priority_text VARCHAR DEFAULT ''")
+            if "llm_max_attempts" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN llm_max_attempts INTEGER DEFAULT 3")
+            if "llm_timeout_s" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN llm_timeout_s FLOAT DEFAULT 15.0")
+            if "exclude_openai_owned_models" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN exclude_openai_owned_models BOOLEAN DEFAULT 1")
 
             tgt_res = conn.exec_driver_sql("PRAGMA table_info(discoverytarget)").fetchall()
             tgt_cols = {r[1] for r in (tgt_res or [])}

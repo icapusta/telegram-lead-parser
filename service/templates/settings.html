@@ -44,11 +44,12 @@
       .top { display:flex; gap: 12px; align-items:center; justify-content:space-between; }
       .brand { display:flex; gap: 10px; align-items:baseline; }
       .brand h1 { margin: 0; font-size: 16px; letter-spacing: 0.2px; }
-      .brand a { color: var(--accent); text-decoration: none; font-size: 12px; }
       .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; }
+      .head-actions { display:flex; gap:8px; align-items:center; }
       .card { margin-top: 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 14px; padding: 14px; }
       label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
       textarea { width: 100%; min-height: 160px; resize: vertical; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-family: var(--mono); font-size: 12px; outline: none; }
+      input[type="number"] { width:100%; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-size:12px; outline:none; }
       .row { display:flex; gap: 12px; flex-wrap: wrap; }
       .row > div { flex: 1 1 420px; }
       .toggles { display:flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -64,10 +65,13 @@
       <div class="top">
         <div class="brand">
           <h1>Settings</h1>
-          <a href="/">Dashboard</a>
-          <a href="/discovery">Discovery</a>
         </div>
-        <button class="btn" onclick="toggleTheme()">Toggle theme</button>
+        <div class="head-actions">
+          <a class="btn" href="/">Dashboard</a>
+          <a class="btn" href="/discovery">Discovery</a>
+          <a class="btn" href="/discovery/targets">Found Targets</a>
+          <button class="btn" onclick="toggleTheme()">Toggle theme</button>
+        </div>
       </div>
 
       <div class="card">
@@ -86,6 +90,23 @@
             <div>
               <label>Stopwords (one per line). If enabled and list is non-empty, any match blocks the message.</label>
               <textarea name="stopwords_text" spellcheck="false">{{ cfg.stopwords_text }}</textarea>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:12px;">
+            <div>
+              <label>LLM model routing priority (one model id per line).</label>
+              <textarea name="llm_model_priority_text" spellcheck="false">{{ cfg.llm_model_priority_text }}</textarea>
+            </div>
+            <div>
+              <label>LLM max attempts (models per message)</label>
+              <input type="number" min="1" max="12" name="llm_max_attempts" value="{{ cfg.llm_max_attempts }}" />
+              <label style="margin-top:10px;">LLM timeout (sec, per model request)</label>
+              <input type="number" min="3" max="90" step="1" name="llm_timeout_s" value="{{ cfg.llm_timeout_s }}" />
+              <div class="toggles" style="margin-top:12px;">
+                <label class="toggle"><input type="checkbox" name="exclude_openai_owned_models" value="true" {% if cfg.exclude_openai_owned_models %}checked{% endif %}/> Exclude models where owned_by=openai</label>
+              </div>
+              <div class="hint">Routing applies to lead classification and auto stop-word suggestions.</div>
             </div>
           </div>
 

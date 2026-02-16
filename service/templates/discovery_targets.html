@@ -44,9 +44,9 @@
       .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
       .brand { display:flex; align-items:baseline; gap:10px; }
       .brand h1 { margin:0; font-size:18px; }
-      .brand a { color:var(--accent); text-decoration:none; font-size:12px; }
       .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; }
       .btn[disabled] { opacity: 0.65; cursor: not-allowed; }
+      .head-actions { display:flex; gap:8px; align-items:center; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
       .table-wrap { width:100%; overflow:auto; border-radius:10px; }
       table { width:100%; min-width: 1320px; border-collapse:collapse; table-layout: fixed; }
@@ -66,11 +66,13 @@
       <div class="top">
         <div class="brand">
           <h1>Found Targets</h1>
-          <a href="/discovery">Discovery</a>
-          <a href="/">Dashboard</a>
-          <a href="/settings">Settings</a>
         </div>
-        <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
+        <div class="head-actions">
+          <a class="btn" href="/">Dashboard</a>
+          <a class="btn" href="/discovery">Discovery</a>
+          <a class="btn" href="/settings">Settings</a>
+          <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
+        </div>
       </div>
 
       <div class="card">

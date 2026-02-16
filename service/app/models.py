@@ -66,6 +66,23 @@ class AppSettings(SQLModel, table=True):
     keywords_text: str = ""
     stopwords_text: str = ""
 
+    # LLM routing settings (runtime-overridable from UI).
+    llm_model_priority_text: str = (
+        "glm-4.7-flash\n"
+        "or-llama-3.3-70b-free\n"
+        "or-hermes-3-405b-free\n"
+        "or-deepseek-r1-0528-free\n"
+        "or-mistral-small-3.1-free\n"
+        "or-gpt-oss-120b-free\n"
+        "or-step-3.5-flash-free\n"
+        "or-qwen3-next-80b-free\n"
+        "or-qwen3-coder-free\n"
+        "or-qwen3-4b-free\n"
+    )
+    llm_max_attempts: int = Field(default=3)
+    llm_timeout_s: float = Field(default=15.0)
+    exclude_openai_owned_models: bool = Field(default=True)
+
     # Discovery settings (tg-agent).
     discovery_enabled: bool = Field(default=True)
     discovery_queries_text: str = ""

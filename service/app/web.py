@@ -23,7 +23,7 @@ from .schemas import (
     InternalDiscoveryTargetRequest,
 )
 from .filtering import hard_filter, request_intent_filter
-from .llm import classify, suggest_stopwords
+from .llm import classify, suggest_stopwords, LLMRoutingOptions, default_model_priority_text
 from .notify import send_event_notification, utcnow
 from .tg_bot_api import set_webhook, answer_callback_query, edit_message_reply_markup, send_message_html
 
@@ -318,18 +318,43 @@ def _require_internal_token(request: Request) -> None:
 def _get_settings(db) -> AppSettings:
     row = db.exec(select(AppSettings).where(AppSettings.id == 1)).first()
     if row:
+        need_update = False
         # Backfill reasonable defaults for discovery queries on existing DBs.
         if not (row.discovery_queries_text or "").strip():
             row.discovery_queries_text = DEFAULT_DISCOVERY_QUERIES_TEXT
+            need_update = True
+        if not (row.llm_model_priority_text or "").strip():
+            row.llm_model_priority_text = default_model_priority_text()
+            need_update = True
+        if row.llm_max_attempts <= 0:
+            row.llm_max_attempts = 3
+            need_update = True
+        if row.llm_timeout_s <= 0:
+            row.llm_timeout_s = 15.0
+            need_update = True
+        if need_update:
             db.add(row)
             db.commit()
             db.refresh(row)
         return row
-    row = AppSettings(id=1, discovery_queries_text=DEFAULT_DISCOVERY_QUERIES_TEXT)
+    row = AppSettings(
+        id=1,
+        discovery_queries_text=DEFAULT_DISCOVERY_QUERIES_TEXT,
+        llm_model_priority_text=default_model_priority_text(),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
     return row
+
+
+def _llm_opts(cfg: AppSettings) -> LLMRoutingOptions:
+    return LLMRoutingOptions(
+        model_priority_text=cfg.llm_model_priority_text,
+        llm_max_attempts=max(1, int(cfg.llm_max_attempts or 3)),
+        llm_timeout_s=max(1.0, float(cfg.llm_timeout_s or 15.0)),
+        exclude_openai_owned_models=bool(cfg.exclude_openai_owned_models),
+    )
 
 
 @app.get("/health")
@@ -378,6 +403,10 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "llm_enabled": cfg.llm_enabled,
         "keywords_text": cfg.keywords_text,
         "stopwords_text": cfg.stopwords_text,
+        "llm_model_priority_text": cfg.llm_model_priority_text,
+        "llm_max_attempts": cfg.llm_max_attempts,
+        "llm_timeout_s": cfg.llm_timeout_s,
+        "exclude_openai_owned_models": cfg.exclude_openai_owned_models,
         "discovery_enabled": cfg.discovery_enabled,
         "discovery_queries_text": cfg.discovery_queries_text,
         "discovery_interval_s": cfg.discovery_interval_s,
@@ -437,7 +466,7 @@ async def internal_classify(req: InternalClassifyRequest, db=Depends(_db), _it=D
             model_used="hard-filter",
         )
 
-    res, model_used = await classify(req.text)
+    res, model_used = await classify(req.text, options=_llm_opts(cfg))
     return InternalClassifyResponse(
         passed_hard_filter=True,
         hard_filter_reason="ok",
@@ -502,7 +531,7 @@ async def process_event(event_id: int) -> None:
                 db.commit()
                 return
 
-            res, model_used = await classify(ev.text)
+            res, model_used = await classify(ev.text, options=_llm_opts(cfg))
             ev.is_lead = res.is_lead
             ev.summary = res.summary
             ev.confidence = res.confidence
@@ -755,6 +784,10 @@ def update_settings(
     llm_enabled: bool = Form(False),
     keywords_text: str = Form(""),
     stopwords_text: str = Form(""),
+    llm_model_priority_text: str = Form(""),
+    llm_max_attempts: int = Form(3),
+    llm_timeout_s: float = Form(15.0),
+    exclude_openai_owned_models: bool = Form(False),
     db=Depends(_db),
     _auth=Depends(_require_auth),
 ):
@@ -764,6 +797,10 @@ def update_settings(
     cfg.llm_enabled = bool(llm_enabled)
     cfg.keywords_text = keywords_text or ""
     cfg.stopwords_text = stopwords_text or ""
+    cfg.llm_model_priority_text = (llm_model_priority_text or "").strip() + "\n" if (llm_model_priority_text or "").strip() else default_model_priority_text()
+    cfg.llm_max_attempts = max(1, min(12, int(llm_max_attempts or 3)))
+    cfg.llm_timeout_s = max(3.0, min(90.0, float(llm_timeout_s or 15.0)))
+    cfg.exclude_openai_owned_models = bool(exclude_openai_owned_models)
     db.add(cfg)
     db.commit()
     return RedirectResponse(url="/settings", status_code=303)
@@ -1013,7 +1050,11 @@ async def tg_webhook(request: Request) -> JSONResponse:
         if action != "lead":
             cfg = _get_settings(db)
             try:
-                additions, _model = await suggest_stopwords(text=ev.text, existing_stopwords_text=cfg.stopwords_text)
+                additions, _model = await suggest_stopwords(
+                    text=ev.text,
+                    existing_stopwords_text=cfg.stopwords_text,
+                    options=_llm_opts(cfg),
+                )
             except Exception as e:
                 ev.last_error = (ev.last_error + "\n" if ev.last_error else "") + f"stopwords: {e}"
                 db.add(ev)

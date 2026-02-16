@@ -79,7 +79,6 @@
       .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
       .brand { display:flex; align-items:baseline; gap:10px; }
       .brand h1 { margin:0; font-size:18px; }
-      .brand a { color:var(--accent); text-decoration:none; font-size:12px; }
       .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
       .stats { display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:10px; margin-top:14px; }
@@ -111,11 +110,11 @@
       <div class="top">
         <div class="brand">
           <h1>Discovery</h1>
-          <a href="/">Dashboard</a>
-          <a href="/settings">Settings</a>
-          <a href="/discovery/targets">Found Targets</a>
         </div>
         <div class="head-actions">
+          <a class="btn" href="/">Dashboard</a>
+          <a class="btn" href="/settings">Settings</a>
+          <a class="btn" href="/discovery/targets">Found Targets</a>
           <button class="btn" type="button" onclick="refreshLogs()">Refresh logs</button>
           <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
         </div>

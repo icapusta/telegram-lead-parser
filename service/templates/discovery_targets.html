@@ -1,9 +1,10 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Найденные площадки</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%25%22 stop-color=%22%232563eb%22/%3E%3Cstop offset=%22100%25%22 stop-color=%22%2310b981%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22url(%23g)%22/%3E%3Cpath d=%22M14 33l12-12 9 9 15-15%22 fill=%22none%22 stroke=%22white%22 stroke-width=%226%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3Ccircle cx=%2250%22 cy=%2215%22 r=%225%22 fill=%22white%22/%3E%3C/svg%3E" />
     <script>
       (function () {
         const key = "theme";
@@ -65,34 +66,34 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>Найденные площадки</h1>
+          <h1>РќР°Р№РґРµРЅРЅС‹Рµ РїР»РѕС‰Р°РґРєРё</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Дашборд</a>
-          <a class="btn" href="/discovery">Дискавери</a>
-          <a class="btn" href="/settings">Настройки</a>
-          <button class="btn" type="button" onclick="toggleTheme()">Сменить тему</button>
+          <a class="btn" href="/">Р”Р°С€Р±РѕСЂРґ</a>
+          <a class="btn" href="/discovery">Р”РёСЃРєР°РІРµСЂРё</a>
+          <a class="btn" href="/settings">РќР°СЃС‚СЂРѕР№РєРё</a>
+          <button class="btn" type="button" onclick="toggleTheme()">РЎРјРµРЅРёС‚СЊ С‚РµРјСѓ</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="small" style="margin-bottom:10px;">Найденные сообщества (без дублей по target_key)</div>
+        <div class="small" style="margin-bottom:10px;">РќР°Р№РґРµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµСЃС‚РІР° (Р±РµР· РґСѓР±Р»РµР№ РїРѕ target_key)</div>
         <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Обновлено</th>
-              <th>Статус</th>
-              <th>Вступал</th>
-              <th>Результат проверки</th>
-              <th>Очередь</th>
-              <th>Источник</th>
-              <th>Цель</th>
+              <th>РћР±РЅРѕРІР»РµРЅРѕ</th>
+              <th>РЎС‚Р°С‚СѓСЃ</th>
+              <th>Р’СЃС‚СѓРїР°Р»</th>
+              <th>Р РµР·СѓР»СЊС‚Р°С‚ РїСЂРѕРІРµСЂРєРё</th>
+              <th>РћС‡РµСЂРµРґСЊ</th>
+              <th>РСЃС‚РѕС‡РЅРёРє</th>
+              <th>Р¦РµР»СЊ</th>
               <th>Username</th>
-              <th>Запрос</th>
-              <th>Примечание</th>
-              <th>Ключ</th>
-              <th>Действие</th>
+              <th>Р—Р°РїСЂРѕСЃ</th>
+              <th>РџСЂРёРјРµС‡Р°РЅРёРµ</th>
+              <th>РљР»СЋС‡</th>
+              <th>Р”РµР№СЃС‚РІРёРµ</th>
             </tr>
           </thead>
           <tbody>
@@ -110,27 +111,27 @@
               </td>
               <td>
                 {% if r.status in ["joined", "kept", "left"] %}
-                  <span class="pill good">да</span>
+                  <span class="pill good">РґР°</span>
                 {% else %}
-                  <span class="pill warn">нет</span>
+                  <span class="pill warn">РЅРµС‚</span>
                 {% endif %}
               </td>
               <td>
                 {% if r.status == "left" and r.note == "no_llm_candidates" %}
-                  <span class="pill bad">вакансий не найдено</span>
+                  <span class="pill bad">РІР°РєР°РЅСЃРёР№ РЅРµ РЅР°Р№РґРµРЅРѕ</span>
                 {% elif r.status == "kept" %}
-                  <span class="pill good">найдены сигналы вакансий</span>
+                  <span class="pill good">РЅР°Р№РґРµРЅС‹ СЃРёРіРЅР°Р»С‹ РІР°РєР°РЅСЃРёР№</span>
                 {% elif r.status == "joined" %}
-                  <span class="pill warn">в процессе проверки</span>
+                  <span class="pill warn">РІ РїСЂРѕС†РµСЃСЃРµ РїСЂРѕРІРµСЂРєРё</span>
                 {% elif r.status == "failed" %}
-                  <span class="pill bad">ошибка обработки</span>
+                  <span class="pill bad">РѕС€РёР±РєР° РѕР±СЂР°Р±РѕС‚РєРё</span>
                 {% else %}
                   <span class="pill">{{ r.note or "-" }}</span>
                 {% endif %}
               </td>
               <td>
                 {% if r.queued_join_scan %}
-                  <span class="pill warn">в очереди</span>
+                  <span class="pill warn">РІ РѕС‡РµСЂРµРґРё</span>
                 {% else %}
                   <span class="pill">-</span>
                 {% endif %}
@@ -150,9 +151,9 @@
               <td>
                 <form method="post" action="/discovery/targets/{{ r.id }}/queue">
                   {% if r.queued_join_scan %}
-                    <button class="btn" type="submit" disabled>Уже в очереди</button>
+                    <button class="btn" type="submit" disabled>РЈР¶Рµ РІ РѕС‡РµСЂРµРґРё</button>
                   {% else %}
-                    <button class="btn" type="submit">Вступить и проверить</button>
+                    <button class="btn" type="submit">Р’СЃС‚СѓРїРёС‚СЊ Рё РїСЂРѕРІРµСЂРёС‚СЊ</button>
                   {% endif %}
                 </form>
               </td>
@@ -165,3 +166,5 @@
     </div>
   </body>
 </html>
+
+

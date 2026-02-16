@@ -1,9 +1,10 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Дискавери</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%25%22 stop-color=%22%232563eb%22/%3E%3Cstop offset=%22100%25%22 stop-color=%22%2310b981%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22url(%23g)%22/%3E%3Cpath d=%22M14 33l12-12 9 9 15-15%22 fill=%22none%22 stroke=%22white%22 stroke-width=%226%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3Ccircle cx=%2250%22 cy=%2215%22 r=%225%22 fill=%22white%22/%3E%3C/svg%3E" />
     <script>
       (function () {
         const key = "theme";
@@ -105,65 +106,65 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>Дискавери</h1>
+          <h1>Р”РёСЃРєР°РІРµСЂРё</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Дашборд</a>
-          <a class="btn" href="/settings">Настройки</a>
-          <a class="btn" href="/discovery/targets">Найденные площадки</a>
-          <button class="btn" type="button" onclick="refreshLogs()">Обновить логи</button>
-          <button class="btn" type="button" onclick="toggleTheme()">Сменить тему</button>
+          <a class="btn" href="/">Р”Р°С€Р±РѕСЂРґ</a>
+          <a class="btn" href="/settings">РќР°СЃС‚СЂРѕР№РєРё</a>
+          <a class="btn" href="/discovery/targets">РќР°Р№РґРµРЅРЅС‹Рµ РїР»РѕС‰Р°РґРєРё</a>
+          <button class="btn" type="button" onclick="refreshLogs()">РћР±РЅРѕРІРёС‚СЊ Р»РѕРіРё</button>
+          <button class="btn" type="button" onclick="toggleTheme()">РЎРјРµРЅРёС‚СЊ С‚РµРјСѓ</button>
         </div>
       </div>
 
       <div class="card">
         <form method="post" action="/discovery">
           <div class="toggles">
-            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Дискавери включен</label>
-            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> Автовыход при отсутствии лидов</label>
+            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Р”РёСЃРєР°РІРµСЂРё РІРєР»СЋС‡РµРЅ</label>
+            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> РђРІС‚РѕРІС‹С…РѕРґ РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё Р»РёРґРѕРІ</label>
           </div>
           <div class="grid">
             <div>
-              <label>Поисковые запросы (по одному на строку)</label>
+              <label>РџРѕРёСЃРєРѕРІС‹Рµ Р·Р°РїСЂРѕСЃС‹ (РїРѕ РѕРґРЅРѕРјСѓ РЅР° СЃС‚СЂРѕРєСѓ)</label>
               <textarea name="discovery_queries_text" spellcheck="false">{{ cfg.discovery_queries_text }}</textarea>
             </div>
             <div>
-              <label>Интервал дискавери (сек)</label>
+              <label>РРЅС‚РµСЂРІР°Р» РґРёСЃРєР°РІРµСЂРё (СЃРµРє)</label>
               <input type="number" min="60" name="discovery_interval_s" value="{{ cfg.discovery_interval_s }}" />
-              <label style="margin-top:10px;">Глубина сканирования (дни)</label>
+              <label style="margin-top:10px;">Р“Р»СѓР±РёРЅР° СЃРєР°РЅРёСЂРѕРІР°РЅРёСЏ (РґРЅРё)</label>
               <input type="number" min="1" name="scan_days" value="{{ cfg.scan_days }}" />
-              <label style="margin-top:10px;">Максимум сообщений на скан</label>
+              <label style="margin-top:10px;">РњР°РєСЃРёРјСѓРј СЃРѕРѕР±С‰РµРЅРёР№ РЅР° СЃРєР°РЅ</label>
               <input type="number" min="30" name="scan_max_messages" value="{{ cfg.scan_max_messages }}" />
-              <label style="margin-top:10px;">Размер LLM-выборки</label>
+              <label style="margin-top:10px;">Р Р°Р·РјРµСЂ LLM-РІС‹Р±РѕСЂРєРё</label>
               <input type="number" min="1" name="scan_llm_sample" value="{{ cfg.scan_llm_sample }}" />
-              <label style="margin-top:10px;">Вступлений в день</label>
+              <label style="margin-top:10px;">Р’СЃС‚СѓРїР»РµРЅРёР№ РІ РґРµРЅСЊ</label>
               <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
-              <label style="margin-top:10px;">Вступлений в час</label>
+              <label style="margin-top:10px;">Р’СЃС‚СѓРїР»РµРЅРёР№ РІ С‡Р°СЃ</label>
               <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
-              <label style="margin-top:10px;">Поисковых запросов в день</label>
+              <label style="margin-top:10px;">РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ РґРµРЅСЊ</label>
               <input type="number" min="20" name="search_requests_per_day" value="{{ cfg.search_requests_per_day }}" />
-              <label style="margin-top:10px;">Поисковых запросов в час</label>
+              <label style="margin-top:10px;">РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ С‡Р°СЃ</label>
               <input type="number" min="5" name="search_requests_per_hour" value="{{ cfg.search_requests_per_hour }}" />
-              <label style="margin-top:10px;">Запросов за тик</label>
+              <label style="margin-top:10px;">Р—Р°РїСЂРѕСЃРѕРІ Р·Р° С‚РёРє</label>
               <input type="number" min="1" name="queries_per_tick" value="{{ cfg.queries_per_tick }}" />
-              <label style="margin-top:10px;">Результатов на запрос</label>
+              <label style="margin-top:10px;">Р РµР·СѓР»СЊС‚Р°С‚РѕРІ РЅР° Р·Р°РїСЂРѕСЃ</label>
               <input type="number" min="5" max="50" name="search_results_per_query" value="{{ cfg.search_results_per_query }}" />
             </div>
           </div>
           <div class="save">
-            <button class="btn" type="submit">Сохранить настройки дискавери</button>
+            <button class="btn" type="submit">РЎРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РґРёСЃРєР°РІРµСЂРё</button>
           </div>
         </form>
-        <div class="small" style="margin-top:16px; margin-bottom:10px;">Последние 200 событий дискавери</div>
+        <div class="small" style="margin-top:16px; margin-bottom:10px;">РџРѕСЃР»РµРґРЅРёРµ 200 СЃРѕР±С‹С‚РёР№ РґРёСЃРєР°РІРµСЂРё</div>
         <table>
           <thead>
             <tr>
-              <th>Время</th>
-              <th>Уровень</th>
-              <th>Событие</th>
-              <th>Чат</th>
-              <th>Запрос</th>
-              <th>Сообщение</th>
+              <th>Р’СЂРµРјСЏ</th>
+              <th>РЈСЂРѕРІРµРЅСЊ</th>
+              <th>РЎРѕР±С‹С‚РёРµ</th>
+              <th>Р§Р°С‚</th>
+              <th>Р—Р°РїСЂРѕСЃ</th>
+              <th>РЎРѕРѕР±С‰РµРЅРёРµ</th>
             </tr>
           </thead>
           <tbody id="logs">
@@ -191,3 +192,5 @@
     </div>
   </body>
 </html>
+
+

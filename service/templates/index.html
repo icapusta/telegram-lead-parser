@@ -22,7 +22,7 @@
       }
       async function retry(id) {
         const r = await fetch(`/api/events/${id}/retry`, { method: "POST" });
-        if (!r.ok) alert("РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊ РѕР±СЂР°Р±РѕС‚РєСѓ");
+        if (!r.ok) alert("Не удалось перезапустить обработку");
         location.reload();
       }
     </script>
@@ -54,7 +54,7 @@
       .brand { display:flex; gap: 10px; align-items:baseline; }
       .brand h1 { margin: 0; font-size: 18px; letter-spacing: 0.2px; }
       .brand .sub { color: var(--muted); font-size: 12px; }
-      .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; }
+      .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; white-space: nowrap; }
       .stats { margin-top: 12px; display:grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 8px; }
       .stat { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 10px; }
       .stat .k { color: var(--muted); font-size: 11px; }
@@ -69,13 +69,13 @@
       .pill.good { color: var(--good); border-color: rgba(46,204,113,0.35); }
       .pill.bad { color: var(--bad); border-color: rgba(255,92,122,0.35); }
       .pill.warn { color: var(--warn); border-color: rgba(241,196,15,0.35); }
-      .actions { display:flex; gap: 8px; }
+      .actions { display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
       .small { color: var(--muted); font-size: 11px; }
       .summary { margin-top: 4px; color: var(--muted); }
       .excerpt { max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      @media (max-width: 980px) { .stats { grid-template-columns: repeat(2, minmax(140px, 1fr)); } }
+      @media (max-width: 980px) { .stats { grid-template-columns: repeat(2, minmax(140px, 1fr)); } .top { align-items: flex-start; flex-direction: column; } .actions { justify-content: flex-start; } }
       @media (max-width: 560px) { .stats { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -83,26 +83,26 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>РџР°СЂСЃРµСЂ</h1>
-          <div class="sub">РїСЂРёРµРј РёР· tg-monitor, LLM-С„РёР»СЊС‚СЂ, СѓРІРµРґРѕРјР»РµРЅРёСЏ РІ Р±РѕС‚Р°</div>
+          <h1>Парсер</h1>
+          <div class="sub">прием из tg-monitor, LLM-фильтр, уведомления в бота</div>
         </div>
         <div class="actions">
-          <button class="btn" onclick="toggleTheme()">РЎРјРµРЅРёС‚СЊ С‚РµРјСѓ</button>
-          <a class="btn" href="/settings">РќР°СЃС‚СЂРѕР№РєРё</a>
-          <a class="btn" href="/discovery">Р”РёСЃРєР°РІРµСЂРё</a>
-          <a class="btn" href="/health">РџСЂРѕРІРµСЂРєР°</a>
+          <button class="btn" onclick="toggleTheme()">Сменить тему</button>
+          <a class="btn" href="/settings">Настройки</a>
+          <a class="btn" href="/discovery">Дискавери</a>
+          <a class="btn" href="/health">Проверка</a>
         </div>
       </div>
 
       <div class="stats">
-        <div class="stat"><div class="k">Р’СЃРµРіРѕ СЃРѕРѕР±С‰РµРЅРёР№</div><div class="v">{{ stats.total_messages }}</div></div>
-        <div class="stat"><div class="k">Р›РёРґРѕРІ Р·Р° РґРµРЅСЊ</div><div class="v">{{ stats.leads_day }}</div></div>
-        <div class="stat"><div class="k">Р›РёРґРѕРІ Р·Р° РЅРµРґРµР»СЋ</div><div class="v">{{ stats.leads_week }}</div></div>
-        <div class="stat"><div class="k">Р›РёРґРѕРІ Р·Р° РјРµСЃСЏС†</div><div class="v">{{ stats.leads_month }}</div></div>
-        <div class="stat"><div class="k">Р”РѕР±Р°РІР»РµРЅРѕ РІ РґРёСЃРєР°РІРµСЂРё (РґРµРЅСЊ)</div><div class="v">{{ stats.added_today }}</div></div>
-        <div class="stat"><div class="k">Р’СЃС‚СѓРїР»РµРЅРёР№ (РґРµРЅСЊ)</div><div class="v">{{ stats.joins_today }}</div></div>
-        <div class="stat"><div class="k">Р’С‹С…РѕРґРѕРІ (РґРµРЅСЊ)</div><div class="v">{{ stats.leaves_today }}</div></div>
-        <div class="stat"><div class="k">РљРѕРЅРІРµСЂСЃРёСЏ РІ Р»РёРґС‹ Р·Р° 30Рґ</div><div class="v">{{ stats.lead_rate_month }}%</div></div>
+        <div class="stat"><div class="k">Всего сообщений</div><div class="v">{{ stats.total_messages }}</div></div>
+        <div class="stat"><div class="k">Лидов за день</div><div class="v">{{ stats.leads_day }}</div></div>
+        <div class="stat"><div class="k">Лидов за неделю</div><div class="v">{{ stats.leads_week }}</div></div>
+        <div class="stat"><div class="k">Лидов за месяц</div><div class="v">{{ stats.leads_month }}</div></div>
+        <div class="stat"><div class="k">Добавлено в дискавери (день)</div><div class="v">{{ stats.added_today }}</div></div>
+        <div class="stat"><div class="k">Вступлений (день)</div><div class="v">{{ stats.joins_today }}</div></div>
+        <div class="stat"><div class="k">Выходов (день)</div><div class="v">{{ stats.leaves_today }}</div></div>
+        <div class="stat"><div class="k">Конверсия в лиды за 30д</div><div class="v">{{ stats.lead_rate_month }}%</div></div>
       </div>
 
       <div class="grid">
@@ -110,13 +110,13 @@
           <thead>
             <tr>
               <th>ID</th>
-              <th>Р’СЂРµРјСЏ</th>
-              <th>РЎС‚Р°С‚СѓСЃ</th>
-              <th>Р›РёРґ</th>
-              <th>Р¤РёРґР±РµРє</th>
-              <th>РўРµРєСЃС‚</th>
-              <th>РњРѕРґРµР»СЊ</th>
-              <th>Р”РµР№СЃС‚РІРёСЏ</th>
+              <th>Время</th>
+              <th>Статус</th>
+              <th>Лид</th>
+              <th>Фидбек</th>
+              <th>Текст</th>
+              <th>Модель</th>
+              <th>Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -126,37 +126,37 @@
               <td class="small">{{ msk_hhmm(r.created_at) }}</td>
               <td>
                 {% if r.status.value == "done" %}
-                  <span class="pill good">РіРѕС‚РѕРІРѕ</span>
+                  <span class="pill good">готово</span>
                 {% elif r.status.value == "failed" %}
-                  <span class="pill bad">РѕС€РёР±РєР°</span>
+                  <span class="pill bad">ошибка</span>
                 {% elif r.status.value == "processing" %}
-                  <span class="pill warn">РѕР±СЂР°Р±РѕС‚РєР°</span>
+                  <span class="pill warn">обработка</span>
                 {% else %}
-                  <span class="pill">РІ РѕС‡РµСЂРµРґРё</span>
+                  <span class="pill">в очереди</span>
                 {% endif %}
               </td>
               <td>
                 {% if r.is_lead is none %}
                   <span class="pill">?</span>
                 {% elif r.is_lead %}
-                  <span class="pill good">РґР°</span>
+                  <span class="pill good">да</span>
                 {% else %}
-                  <span class="pill bad">РЅРµС‚</span>
+                  <span class="pill bad">нет</span>
                 {% endif %}
                 {% if r.notified %}
-                  <div class="small">СѓРІРµРґРѕРјР»РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ</div>
+                  <div class="small">уведомление отправлено</div>
                 {% endif %}
               </td>
               <td>
                 {% if r.feedback == "lead" %}
-                  <span class="pill good">Р»РёРґ</span>
+                  <span class="pill good">лид</span>
                 {% elif r.feedback == "not_lead" %}
-                  <span class="pill bad">РЅРµ Р»РёРґ</span>
+                  <span class="pill bad">не лид</span>
                 {% else %}
                   <span class="pill">-</span>
                 {% endif %}
                 {% if r.stopwords_added %}
-                  <div class="small" title="{{ r.stopwords_added }}">РґРѕР±Р°РІР»РµРЅС‹ СЃС‚РѕРї-СЃР»РѕРІР°</div>
+                  <div class="small" title="{{ r.stopwords_added }}">добавлены стоп-слова</div>
                 {% endif %}
               </td>
               <td>
@@ -165,7 +165,7 @@
                   <div class="summary">{{ r.summary }}</div>
                 {% endif %}
                 {% if r.link %}
-                  <div class="small"><a href="{{ r.link }}" target="_blank" rel="noreferrer">СЃСЃС‹Р»РєР°</a></div>
+                  <div class="small"><a href="{{ r.link }}" target="_blank" rel="noreferrer">ссылка</a></div>
                 {% endif %}
                 {% if r.last_error %}
                   <div class="small" style="color: var(--bad); margin-top:6px;">{{ r.last_error }}</div>
@@ -173,7 +173,7 @@
               </td>
               <td class="mono">{{ r.model_used }}</td>
               <td>
-                <button class="btn" onclick="retry({{ r.id }})">РџРѕРІС‚РѕСЂРёС‚СЊ</button>
+                <button class="btn" onclick="retry({{ r.id }})">Повторить</button>
               </td>
             </tr>
           {% endfor %}
@@ -181,7 +181,7 @@
         </table>
       </div>
       <div class="small" style="margin-top:10px;">
-        URL РїСЂРёРµРјР°: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
+        URL приема: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
       </div>
     </div>
   </body>

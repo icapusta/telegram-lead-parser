@@ -80,7 +80,7 @@
       .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
       .brand { display:flex; align-items:baseline; gap:10px; }
       .brand h1 { margin:0; font-size:18px; }
-      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; }
+      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; white-space: nowrap; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
       .grid { display:grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap:12px; align-items:start; }
       .grid > div { min-width: 0; }
@@ -112,87 +112,87 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>Р”РёСЃРєР°РІРµСЂРё</h1>
+          <h1>Дискавери</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Р”Р°С€Р±РѕСЂРґ</a>
-          <a class="btn" href="/settings">РќР°СЃС‚СЂРѕР№РєРё</a>
-          <a class="btn" href="/discovery/targets">РќР°Р№РґРµРЅРЅС‹Рµ РїР»РѕС‰Р°РґРєРё</a>
-          <button class="btn" type="button" onclick="refreshLogs()">РћР±РЅРѕРІРёС‚СЊ Р»РѕРіРё</button>
-          <button class="btn" type="button" onclick="toggleTheme()">РЎРјРµРЅРёС‚СЊ С‚РµРјСѓ</button>
+          <a class="btn" href="/">Дашборд</a>
+          <a class="btn" href="/settings">Настройки</a>
+          <a class="btn" href="/discovery/targets">Найденные площадки</a>
+          <button class="btn" type="button" onclick="refreshLogs()">Обновить логи</button>
+          <button class="btn" type="button" onclick="toggleTheme()">Сменить тему</button>
         </div>
       </div>
 
       <div class="card">
         <form method="post" action="/discovery">
           <div class="toggles">
-            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Р”РёСЃРєР°РІРµСЂРё РІРєР»СЋС‡РµРЅ</label>
-            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> РђРІС‚РѕРІС‹С…РѕРґ РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё Р»РёРґРѕРІ</label>
+            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Дискавери включен</label>
+            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> Автовыход при отсутствии лидов</label>
           </div>
           <div class="grid">
             <div>
-              <label>РџРѕРёСЃРєРѕРІС‹Рµ Р·Р°РїСЂРѕСЃС‹ (РїРѕ РѕРґРЅРѕРјСѓ РЅР° СЃС‚СЂРѕРєСѓ)</label>
+              <label>Поисковые запросы (по одному на строку)</label>
               <textarea name="discovery_queries_text" spellcheck="false">{{ cfg.discovery_queries_text }}</textarea>
             </div>
             <div>
               <div class="params-grid">
                 <div class="field">
-                  <label>РРЅС‚РµСЂРІР°Р» РґРёСЃРєР°РІРµСЂРё (СЃРµРє)</label>
+                  <label>Интервал дискавери (сек)</label>
                   <input type="number" min="60" name="discovery_interval_s" value="{{ cfg.discovery_interval_s }}" />
                 </div>
                 <div class="field">
-                  <label>Р“Р»СѓР±РёРЅР° СЃРєР°РЅРёСЂРѕРІР°РЅРёСЏ (РґРЅРё)</label>
+                  <label>Глубина сканирования (дни)</label>
                   <input type="number" min="1" name="scan_days" value="{{ cfg.scan_days }}" />
                 </div>
                 <div class="field">
-                  <label>РњР°РєСЃРёРјСѓРј СЃРѕРѕР±С‰РµРЅРёР№ РЅР° СЃРєР°РЅ</label>
+                  <label>Максимум сообщений на скан</label>
                   <input type="number" min="30" name="scan_max_messages" value="{{ cfg.scan_max_messages }}" />
                 </div>
                 <div class="field">
-                  <label>Р Р°Р·РјРµСЂ LLM-РІС‹Р±РѕСЂРєРё</label>
+                  <label>Размер LLM-выборки</label>
                   <input type="number" min="1" name="scan_llm_sample" value="{{ cfg.scan_llm_sample }}" />
                 </div>
                 <div class="field">
-                  <label>Р’СЃС‚СѓРїР»РµРЅРёР№ РІ РґРµРЅСЊ</label>
+                  <label>Вступлений в день</label>
                   <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
                 </div>
                 <div class="field">
-                  <label>Р’СЃС‚СѓРїР»РµРЅРёР№ РІ С‡Р°СЃ</label>
+                  <label>Вступлений в час</label>
                   <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
                 </div>
                 <div class="field">
-                  <label>РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ РґРµРЅСЊ</label>
+                  <label>Поисковых запросов в день</label>
                   <input type="number" min="20" name="search_requests_per_day" value="{{ cfg.search_requests_per_day }}" />
                 </div>
                 <div class="field">
-                  <label>РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ С‡Р°СЃ</label>
+                  <label>Поисковых запросов в час</label>
                   <input type="number" min="5" name="search_requests_per_hour" value="{{ cfg.search_requests_per_hour }}" />
                 </div>
                 <div class="field">
-                  <label>Р—Р°РїСЂРѕСЃРѕРІ Р·Р° С‚РёРє</label>
+                  <label>Запросов за тик</label>
                   <input type="number" min="1" name="queries_per_tick" value="{{ cfg.queries_per_tick }}" />
                 </div>
                 <div class="field">
-                  <label>Р РµР·СѓР»СЊС‚Р°С‚РѕРІ РЅР° Р·Р°РїСЂРѕСЃ</label>
+                  <label>Результатов на запрос</label>
                   <input type="number" min="5" max="50" name="search_results_per_query" value="{{ cfg.search_results_per_query }}" />
                 </div>
               </div>
             </div>
           </div>
           <div class="save">
-            <button class="btn" type="submit">РЎРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РґРёСЃРєР°РІРµСЂРё</button>
+            <button class="btn" type="submit">Сохранить настройки дискавери</button>
           </div>
         </form>
-        <div class="small" style="margin-top:16px; margin-bottom:10px;">РџРѕСЃР»РµРґРЅРёРµ 200 СЃРѕР±С‹С‚РёР№ РґРёСЃРєР°РІРµСЂРё</div>
+        <div class="small" style="margin-top:16px; margin-bottom:10px;">Последние 200 событий дискавери</div>
         <table>
           <thead>
             <tr>
-              <th>Р’СЂРµРјСЏ</th>
-              <th>РЈСЂРѕРІРµРЅСЊ</th>
-              <th>РЎРѕР±С‹С‚РёРµ</th>
-              <th>Р§Р°С‚</th>
-              <th>Р—Р°РїСЂРѕСЃ</th>
-              <th>РЎРѕРѕР±С‰РµРЅРёРµ</th>
+              <th>Время</th>
+              <th>Уровень</th>
+              <th>Событие</th>
+              <th>Чат</th>
+              <th>Запрос</th>
+              <th>Сообщение</th>
             </tr>
           </thead>
           <tbody id="logs">

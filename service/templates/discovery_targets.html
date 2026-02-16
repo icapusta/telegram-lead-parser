@@ -45,9 +45,9 @@
       .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
       .brand { display:flex; align-items:baseline; gap:10px; }
       .brand h1 { margin:0; font-size:18px; }
-      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; }
+      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; white-space: nowrap; }
       .btn[disabled] { opacity: 0.65; cursor: not-allowed; }
-      .head-actions { display:flex; gap:8px; align-items:center; }
+      .head-actions { display:flex; gap:8px; align-items:center; flex-wrap: wrap; justify-content: flex-end; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
       .table-wrap { width:100%; overflow:auto; border-radius:10px; }
       table { width:100%; min-width: 1320px; border-collapse:collapse; table-layout: fixed; }
@@ -60,40 +60,44 @@
       .pill.bad { color:var(--bad); border-color:rgba(255,92,122,0.35); }
       .pill.warn { color:var(--warn); border-color:rgba(241,196,15,0.35); }
       a { color:var(--accent); }
+      @media (max-width: 900px) {
+        .top { align-items:flex-start; flex-direction:column; }
+        .head-actions { justify-content:flex-start; }
+      }
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>РќР°Р№РґРµРЅРЅС‹Рµ РїР»РѕС‰Р°РґРєРё</h1>
+          <h1>Найденные площадки</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Р”Р°С€Р±РѕСЂРґ</a>
-          <a class="btn" href="/discovery">Р”РёСЃРєР°РІРµСЂРё</a>
-          <a class="btn" href="/settings">РќР°СЃС‚СЂРѕР№РєРё</a>
-          <button class="btn" type="button" onclick="toggleTheme()">РЎРјРµРЅРёС‚СЊ С‚РµРјСѓ</button>
+          <a class="btn" href="/">Дашборд</a>
+          <a class="btn" href="/discovery">Дискавери</a>
+          <a class="btn" href="/settings">Настройки</a>
+          <button class="btn" type="button" onclick="toggleTheme()">Сменить тему</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="small" style="margin-bottom:10px;">РќР°Р№РґРµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµСЃС‚РІР° (Р±РµР· РґСѓР±Р»РµР№ РїРѕ target_key)</div>
+        <div class="small" style="margin-bottom:10px;">Найденные сообщества (без дублей по target_key)</div>
         <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>РћР±РЅРѕРІР»РµРЅРѕ</th>
-              <th>РЎС‚Р°С‚СѓСЃ</th>
-              <th>Р’СЃС‚СѓРїР°Р»</th>
-              <th>Р РµР·СѓР»СЊС‚Р°С‚ РїСЂРѕРІРµСЂРєРё</th>
-              <th>РћС‡РµСЂРµРґСЊ</th>
-              <th>РСЃС‚РѕС‡РЅРёРє</th>
-              <th>Р¦РµР»СЊ</th>
+              <th>Обновлено</th>
+              <th>Статус</th>
+              <th>Вступал</th>
+              <th>Результат проверки</th>
+              <th>Очередь</th>
+              <th>Источник</th>
+              <th>Цель</th>
               <th>Username</th>
-              <th>Р—Р°РїСЂРѕСЃ</th>
-              <th>РџСЂРёРјРµС‡Р°РЅРёРµ</th>
-              <th>РљР»СЋС‡</th>
-              <th>Р”РµР№СЃС‚РІРёРµ</th>
+              <th>Запрос</th>
+              <th>Примечание</th>
+              <th>Ключ</th>
+              <th>Действие</th>
             </tr>
           </thead>
           <tbody>
@@ -111,27 +115,27 @@
               </td>
               <td>
                 {% if r.status in ["joined", "kept", "left"] %}
-                  <span class="pill good">РґР°</span>
+                  <span class="pill good">да</span>
                 {% else %}
-                  <span class="pill warn">РЅРµС‚</span>
+                  <span class="pill warn">нет</span>
                 {% endif %}
               </td>
               <td>
                 {% if r.status == "left" and r.note == "no_llm_candidates" %}
-                  <span class="pill bad">РІР°РєР°РЅСЃРёР№ РЅРµ РЅР°Р№РґРµРЅРѕ</span>
+                  <span class="pill bad">вакансий не найдено</span>
                 {% elif r.status == "kept" %}
-                  <span class="pill good">РЅР°Р№РґРµРЅС‹ СЃРёРіРЅР°Р»С‹ РІР°РєР°РЅСЃРёР№</span>
+                  <span class="pill good">найдены сигналы вакансий</span>
                 {% elif r.status == "joined" %}
-                  <span class="pill warn">РІ РїСЂРѕС†РµСЃСЃРµ РїСЂРѕРІРµСЂРєРё</span>
+                  <span class="pill warn">в процессе проверки</span>
                 {% elif r.status == "failed" %}
-                  <span class="pill bad">РѕС€РёР±РєР° РѕР±СЂР°Р±РѕС‚РєРё</span>
+                  <span class="pill bad">ошибка обработки</span>
                 {% else %}
                   <span class="pill">{{ r.note or "-" }}</span>
                 {% endif %}
               </td>
               <td>
                 {% if r.queued_join_scan %}
-                  <span class="pill warn">РІ РѕС‡РµСЂРµРґРё</span>
+                  <span class="pill warn">в очереди</span>
                 {% else %}
                   <span class="pill">-</span>
                 {% endif %}
@@ -151,9 +155,9 @@
               <td>
                 <form method="post" action="/discovery/targets/{{ r.id }}/queue">
                   {% if r.queued_join_scan %}
-                    <button class="btn" type="submit" disabled>РЈР¶Рµ РІ РѕС‡РµСЂРµРґРё</button>
+                    <button class="btn" type="submit" disabled>Уже в очереди</button>
                   {% else %}
-                    <button class="btn" type="submit">Р’СЃС‚СѓРїРёС‚СЊ Рё РїСЂРѕРІРµСЂРёС‚СЊ</button>
+                    <button class="btn" type="submit">Вступить и проверить</button>
                   {% endif %}
                 </form>
               </td>

@@ -37,7 +37,9 @@ def env_int(name: str, default: int) -> int:
 def _split_lines(s: str) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
-    for line in (s or "").splitlines():
+    # Allow passing values like "a\\nb\\nc" via env.
+    s = (s or "").replace("\\n", "\n")
+    for line in s.splitlines():
         t = line.strip()
         if not t:
             continue

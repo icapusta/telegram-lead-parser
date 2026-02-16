@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from datetime import datetime
@@ -103,12 +104,8 @@ async def ingest(payload: TgMonitorPayload, db=Depends(_db)) -> dict:
     db.commit()
     db.refresh(ev)
 
-    # Fire-and-forget processing is fine for MVP; we also expose a manual retry in UI.
-    # If this raises, we keep the event pending so a later worker can pick it up.
-    try:
-        await _process_event(ev.id, db)
-    except Exception:
-        pass
+    # Fire-and-forget: return immediately; do classification in background with its own DB session.
+    asyncio.create_task(process_event(ev.id))
 
     return {"ok": True, "id": ev.id}
 
@@ -125,75 +122,75 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
     }
 
 
-async def _process_event(event_id: int, db) -> None:
-    ev = db.exec(select(TgMonitorEvent).where(TgMonitorEvent.id == event_id)).one()
-    if ev.status in (EventStatus.processing, EventStatus.done):
-        return
-
-    ev.status = EventStatus.processing
-    db.add(ev)
-    db.commit()
-
-    try:
-        cfg = _get_settings(db)
-        hf = hard_filter(
-            text=ev.text,
-            keywords_enabled=cfg.keywords_enabled,
-            stopwords_enabled=cfg.stopwords_enabled,
-            keywords_text=cfg.keywords_text,
-            stopwords_text=cfg.stopwords_text,
-        )
-
-        if not hf.passed:
-            ev.is_lead = False
-            ev.summary = f"hard_filter:{hf.reason}"
-            ev.confidence = None
-            ev.model_used = "hard-filter"
-            ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
-            ev.status = EventStatus.done
-            db.add(ev)
-            db.commit()
+async def process_event(event_id: int) -> None:
+    # Run with isolated DB session to be safe as a background task.
+    with session() as db:
+        ev = db.exec(select(TgMonitorEvent).where(TgMonitorEvent.id == event_id)).one()
+        if ev.status in (EventStatus.processing, EventStatus.done):
             return
 
-        if not cfg.llm_enabled:
-            ev.is_lead = False
-            ev.summary = "llm_disabled"
-            ev.confidence = None
-            ev.model_used = "hard-filter"
-            ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
-            ev.status = EventStatus.done
-            db.add(ev)
-            db.commit()
-            return
-
-        res, model_used = await classify(ev.text)
-        ev.is_lead = res.is_lead
-        ev.summary = res.summary
-        ev.confidence = res.confidence
-        ev.model_used = model_used
-        ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
-        ev.status = EventStatus.done
-
-        if res.is_lead:
-            excerpt = (ev.text or "").strip().replace("\n", " ")[:240]
-            try:
-                await send_lead_notification(excerpt=excerpt, summary=ev.summary, link=ev.link)
-                ev.notified = True
-                ev.notified_at = utcnow()
-            except Exception as e:
-                # Notifications are optional for now; we don't want the whole pipeline to fail
-                # when bot settings are missing or Telegram is temporarily unavailable.
-                ev.notified = False
-                ev.last_error = (ev.last_error + "\n" if ev.last_error else "") + f"notify: {e}"
-
+        ev.status = EventStatus.processing
         db.add(ev)
         db.commit()
 
-    except Exception as e:
-        ev.status = EventStatus.failed
-        ev.last_error = str(e)[:2000]
-        db.add(ev)
-        db.commit()
+        try:
+            cfg = _get_settings(db)
+            hf = hard_filter(
+                text=ev.text,
+                keywords_enabled=cfg.keywords_enabled,
+                stopwords_enabled=cfg.stopwords_enabled,
+                keywords_text=cfg.keywords_text,
+                stopwords_text=cfg.stopwords_text,
+            )
+
+            if not hf.passed:
+                ev.is_lead = False
+                ev.summary = f"hard_filter:{hf.reason}"
+                ev.confidence = None
+                ev.model_used = "hard-filter"
+                ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
+                ev.status = EventStatus.done
+                db.add(ev)
+                db.commit()
+                return
+
+            if not cfg.llm_enabled:
+                ev.is_lead = False
+                ev.summary = "llm_disabled"
+                ev.confidence = None
+                ev.model_used = "hard-filter"
+                ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
+                ev.status = EventStatus.done
+                db.add(ev)
+                db.commit()
+                return
+
+            res, model_used = await classify(ev.text)
+            ev.is_lead = res.is_lead
+            ev.summary = res.summary
+            ev.confidence = res.confidence
+            ev.model_used = model_used
+            ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
+            ev.status = EventStatus.done
+
+            if res.is_lead:
+                excerpt = (ev.text or "").strip().replace("\n", " ")[:240]
+                try:
+                    await send_lead_notification(excerpt=excerpt, summary=ev.summary, link=ev.link)
+                    ev.notified = True
+                    ev.notified_at = utcnow()
+                except Exception as e:
+                    ev.notified = False
+                    ev.last_error = (ev.last_error + "\n" if ev.last_error else "") + f"notify: {e}"
+
+            db.add(ev)
+            db.commit()
+
+        except Exception as e:
+            ev.status = EventStatus.failed
+            ev.last_error = str(e)[:2000]
+            db.add(ev)
+            db.commit()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -256,7 +253,7 @@ async def retry_event(event_id: int, db=Depends(_db), _auth=Depends(_require_aut
     row.last_error = ""
     db.add(row)
     db.commit()
-    await _process_event(event_id, db)
+    await process_event(event_id)
     return JSONResponse({"ok": True})
 
 

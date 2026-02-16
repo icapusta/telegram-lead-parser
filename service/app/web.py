@@ -5,6 +5,7 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi import FastAPI, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials

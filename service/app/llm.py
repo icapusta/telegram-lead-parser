@@ -44,6 +44,20 @@ def _extract_provider_error(data: dict, fallback: str = "") -> tuple[str, str]:
     err = data.get("error")
     if isinstance(err, dict):
         msg = str(err.get("message") or fallback or "")
+        metadata = err.get("metadata")
+        if isinstance(metadata, dict):
+            raw = metadata.get("raw")
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    raw_obj = json.loads(raw)
+                except Exception:
+                    raw_obj = None
+                if isinstance(raw_obj, dict):
+                    nested_err = raw_obj.get("error")
+                    if isinstance(nested_err, dict):
+                        nested_msg = str(nested_err.get("message") or "").strip()
+                        if nested_msg:
+                            msg = nested_msg
         details = err.get("details")
         provider_status = ""
         if isinstance(details, list):
@@ -286,6 +300,15 @@ def _extract_content_text(data: dict) -> str:
     return ""
 
 
+def _is_json_mode_unsupported(err_text: str) -> bool:
+    e = (err_text or "").casefold()
+    return (
+        "json mode is not enabled" in e
+        or "invalid_argument" in e
+        or "response_format" in e
+    )
+
+
 async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple[LLMResult, str, dict]:
     if not settings.cliproxy_base_url:
         raise RuntimeError("cliproxy_base_url is not set")
@@ -351,13 +374,26 @@ async def _chat_completions(
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
     }
+    chat_body_no_rf = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON generator. Output JSON only. All strings in JSON must be Russian."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+    }
 
     attempts: list[tuple[str, dict]] = [
         (f"{base}/chat/completions", chat_body),
+        (f"{base}/chat/completions", chat_body_no_rf),
     ]
 
     last_err: Exception | None = None
+    json_mode_failed = False
     for url, body in attempts:
+        # If JSON mode failed with INVALID_ARGUMENT, try fallback body without response_format.
+        if json_mode_failed and "response_format" in body:
+            continue
         try:
             r = await client.post(url, headers=headers, json=body, timeout=timeout_s)
             try:
@@ -366,6 +402,8 @@ async def _chat_completions(
                 data = {}
             if r.status_code >= 400:
                 msg, provider_status = _extract_provider_error(data, fallback=r.text[:240])
+                if _is_json_mode_unsupported(msg or provider_status):
+                    json_mode_failed = True
                 raise RuntimeError(
                     f"http={r.status_code}; provider_status={provider_status or '-'}; error={msg or 'unknown'}"
                 )
@@ -573,6 +611,11 @@ async def test_model_availability(
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
+    body_no_rf = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Return JSON: {\"ok\":true}"}],
+        "temperature": 0,
+    }
 
     import time
 
@@ -580,6 +623,16 @@ async def test_model_availability(
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(url, headers=_auth_headers(), json=body, timeout=timeout_s)
+            payload = None
+            try:
+                payload = r.json()
+            except Exception:
+                payload = None
+            if r.status_code >= 400:
+                msg, ps = _extract_provider_error(payload or {}, fallback=r.text[:240])
+                if _is_json_mode_unsupported(msg or ps):
+                    # Retry once without response_format for models that don't support JSON mode.
+                    r = await client.post(url, headers=_auth_headers(), json=body_no_rf, timeout=timeout_s)
         latency_ms = int((time.perf_counter() - started) * 1000)
         rate_headers = extract_rate_limit_headers(r.headers)
         payload = None

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Parser</title>
+    <script>
+      (function () {
+        const key = "theme";
+        const saved = localStorage.getItem(key);
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const theme = saved || (prefersDark ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+      })();
+      function toggleTheme() {
+        const key = "theme";
+        const cur = document.documentElement.dataset.theme || "light";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem(key, next);
+      }
+      async function retry(id) {
+        const r = await fetch(`/api/events/${id}/retry`, { method: "POST" });
+        if (!r.ok) alert("retry failed");
+        location.reload();
+      }
+    </script>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #11151b;
+        --text: #e7eef7;
+        --muted: #9db0c4;
+        --border: rgba(255,255,255,0.08);
+        --good: #2ecc71;
+        --bad: #ff5c7a;
+        --warn: #f1c40f;
+        --accent: #58a6ff;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      }
+      :root[data-theme="light"] {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --text: #0f172a;
+        --muted: #475569;
+        --border: rgba(2, 6, 23, 0.10);
+        --accent: #2563eb;
+      }
+      body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+      .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+      .top { display:flex; gap: 12px; align-items:center; justify-content:space-between; }
+      .brand { display:flex; gap: 10px; align-items:baseline; }
+      .brand h1 { margin: 0; font-size: 18px; letter-spacing: 0.2px; }
+      .brand .sub { color: var(--muted); font-size: 12px; }
+      .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; }
+      .grid { margin-top: 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 14px; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 10px 10px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 12px; }
+      th { text-align:left; color: var(--muted); font-weight: 600; }
+      tr:hover td { background: rgba(88,166,255,0.06); }
+      .mono { font-family: var(--mono); }
+      .pill { display:inline-flex; gap:6px; align-items:center; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+      .pill.good { color: var(--good); border-color: rgba(46,204,113,0.35); }
+      .pill.bad { color: var(--bad); border-color: rgba(255,92,122,0.35); }
+      .pill.warn { color: var(--warn); border-color: rgba(241,196,15,0.35); }
+      .actions { display:flex; gap: 8px; }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .small { color: var(--muted); font-size: 11px; }
+      .summary { margin-top: 4px; color: var(--muted); }
+      .excerpt { max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <h1>Parser</h1>
+          <div class="sub">tg-monitor ingest, LLM filter, bot notify</div>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="toggleTheme()">Theme</button>
+          <a class="btn" href="/health">Health</a>
+        </div>
+      </div>
+
+      <div class="grid">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>When</th>
+              <th>Status</th>
+              <th>Lead</th>
+              <th>Text</th>
+              <th>Model</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for r in rows %}
+            <tr>
+              <td class="mono">{{ r.id }}</td>
+              <td class="small">{{ r.created_at }}</td>
+              <td>
+                {% if r.status.value == "done" %}
+                  <span class="pill good">done</span>
+                {% elif r.status.value == "failed" %}
+                  <span class="pill bad">failed</span>
+                {% elif r.status.value == "processing" %}
+                  <span class="pill warn">processing</span>
+                {% else %}
+                  <span class="pill">pending</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.is_lead is none %}
+                  <span class="pill">?</span>
+                {% elif r.is_lead %}
+                  <span class="pill good">yes</span>
+                {% else %}
+                  <span class="pill bad">no</span>
+                {% endif %}
+                {% if r.notified %}
+                  <div class="small">notified</div>
+                {% endif %}
+              </td>
+              <td>
+                <div class="excerpt" title="{{ r.text }}">{{ r.text }}</div>
+                {% if r.summary %}
+                  <div class="summary">{{ r.summary }}</div>
+                {% endif %}
+                {% if r.link %}
+                  <div class="small"><a href="{{ r.link }}" target="_blank" rel="noreferrer">link</a></div>
+                {% endif %}
+                {% if r.last_error %}
+                  <div class="small" style="color: var(--bad); margin-top:6px;">{{ r.last_error }}</div>
+                {% endif %}
+              </td>
+              <td class="mono">{{ r.model_used }}</td>
+              <td>
+                <button class="btn" onclick="retry({{ r.id }})">Retry</button>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="small" style="margin-top:10px;">
+        Ingest URL: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
+      </div>
+    </div>
+  </body>
+</html>
+

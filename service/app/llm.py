@@ -41,6 +41,10 @@ def _default_model_priority() -> list[str]:
 def _is_model_allowed(mi: ModelInfo) -> bool:
     if settings.exclude_openai_owned_models and (mi.owned_by or "").lower() == "openai":
         return False
+    # Hard blocklist: user requested never to use models tied to these accounts.
+    mid = (mi.id or "").casefold()
+    if "icapusta@gmail.com" in mid or "weflyinsky@gmail.com" in mid:
+        return False
     return True
 
 
@@ -168,4 +172,3 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
     if not parsed:
         raise RuntimeError(f"failed to parse model output: {content[:200]}")
     return LLMResult.model_validate(parsed)
-

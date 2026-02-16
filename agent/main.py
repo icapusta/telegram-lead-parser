@@ -14,6 +14,7 @@ import httpx
 import requests
 from telethon import TelegramClient, events, utils
 from telethon.tl import functions, types
+from telethon.errors import UserAlreadyParticipantError
 
 
 def utcnow() -> datetime:
@@ -137,11 +138,47 @@ SCAN_MAX_MESSAGES = env_int("SCAN_MAX_MESSAGES", 300)
 JOIN_PER_DAY = env_int("JOIN_PER_DAY", 8)
 JOIN_PER_HOUR = env_int("JOIN_PER_HOUR", 2)
 JOIN_BUDGET_PATH = os.environ.get("JOIN_BUDGET_PATH", "/data/join_budget.json")
+AGENT_STATE_PATH = os.environ.get("AGENT_STATE_PATH", "/data/agent_state.json")
 
 AUTO_LEAVE_IF_NO_CANDIDATES = env_bool("AUTO_LEAVE_IF_NO_CANDIDATES", True)
 
 
 client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
+
+
+class AgentState:
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+        self.data = self._load()
+
+    def _load(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {"seen_usernames": []}
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"seen_usernames": []}
+
+    def _save(self) -> None:
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.data), encoding="utf-8")
+        tmp.replace(self.path)
+
+    def seen(self, username: str) -> bool:
+        u = (username or "").casefold()
+        return u in set(x.casefold() for x in (self.data.get("seen_usernames") or []))
+
+    def mark_seen(self, username: str) -> None:
+        u = (username or "").strip()
+        if not u:
+            return
+        arr = list(self.data.get("seen_usernames") or [])
+        if u.casefold() in set(x.casefold() for x in arr):
+            return
+        arr.append(u)
+        # keep last 2000
+        self.data["seen_usernames"] = arr[-2000:]
+        self._save()
 
 
 async def _get_business_filter() -> tuple[int, types.DialogFilter] | None:
@@ -234,6 +271,11 @@ async def _fetch_filter_config() -> FilterConfig:
 async def _scan_recent_messages(entity, cfg: FilterConfig) -> int:
     cutoff = utcnow() - timedelta(days=SCAN_DAYS)
     candidates = 0
+    chat = await client.get_entity(entity)
+    chat_username = getattr(chat, "username", None) or ""
+    chat_peer_id = utils.get_peer_id(chat)
+    clean_id = str(chat_peer_id).replace("-100", "")
+
     async for msg in client.iter_messages(entity, offset_date=cutoff, limit=SCAN_MAX_MESSAGES):
         if not getattr(msg, "message", None):
             continue
@@ -243,15 +285,18 @@ async def _scan_recent_messages(entity, cfg: FilterConfig) -> int:
         candidates += 1
         # Push into parser-service for full LLM decision + bot notify.
         try:
-            chat = await client.get_entity(entity)
-            title = getattr(chat, "title", "") or getattr(chat, "username", "") or "Unknown"
+            title = getattr(chat, "title", "") or chat_username or "Unknown"
+            if chat_username:
+                link = f"https://t.me/{chat_username}/{msg.id}"
+            else:
+                link = f"https://t.me/c/{clean_id}/{msg.id}"
             payload = {
                 "text": msg.message,
                 "chat_title": title,
                 "sender_name": "",
                 "sender_link": "",
                 "sender_handle": "",
-                "link": "",
+                "link": link,
                 "keywords": [],
             }
             requests.post(PARSER_INGEST_URL, json=payload, timeout=10)
@@ -265,6 +310,7 @@ async def _scan_recent_messages(entity, cfg: FilterConfig) -> int:
 
 async def discovery_loop() -> None:
     budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=JOIN_PER_DAY, per_hour=JOIN_PER_HOUR)
+    state = AgentState(AGENT_STATE_PATH)
     while True:
         try:
             if not DISCOVERY_ENABLED or not DISCOVERY_QUERIES:
@@ -302,17 +348,26 @@ async def discovery_loop() -> None:
                     if not username:
                         # We can only join public targets without username via invite links (handled separately).
                         continue
+                    if state.seen(username):
+                        continue
+                    state.mark_seen(username)
 
                     try:
-                        await client(functions.channels.JoinChannelRequest(channel=ch))
-                        budget.mark_join()
+                        print(f"join try @{username} (q='{q}')", flush=True)
+                        try:
+                            await client(functions.channels.JoinChannelRequest(channel=ch))
+                            budget.mark_join()
+                            print(f"joined @{username}", flush=True)
+                        except UserAlreadyParticipantError:
+                            print(f"already in @{username}", flush=True)
                     except Exception:
                         continue
 
                     # Add to Business folder.
                     try:
                         peer = await client.get_input_entity(ch)
-                        await _add_to_business(peer)
+                        ok = await _add_to_business(peer)
+                        print(f"business add @{username}: {ok}", flush=True)
                     except Exception:
                         pass
 
@@ -322,6 +377,7 @@ async def discovery_loop() -> None:
                         if AUTO_LEAVE_IF_NO_CANDIDATES and cands == 0:
                             try:
                                 await client(functions.channels.LeaveChannelRequest(channel=ch))
+                                print(f"left @{username} (no candidates)", flush=True)
                             except Exception:
                                 pass
                     except Exception:

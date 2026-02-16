@@ -18,6 +18,19 @@
         document.documentElement.dataset.theme = next;
         localStorage.setItem(key, next);
       }
+      function fmtMskHHMM(iso) {
+        if (!iso) return "";
+        try {
+          return new Date(iso).toLocaleTimeString("ru-RU", {
+            timeZone: "Europe/Moscow",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+          });
+        } catch {
+          return "";
+        }
+      }
       async function refreshLogs() {
         const r = await fetch("/api/discovery/logs?limit=200");
         if (!r.ok) return;
@@ -27,7 +40,7 @@
         for (const row of data) {
           const tr = document.createElement("tr");
           tr.innerHTML = `
-            <td class="small">${row.created_at || ""}</td>
+            <td class="small">${fmtMskHHMM(row.created_at)}</td>
             <td><span class="pill ${row.level === "error" ? "bad" : row.level === "warn" ? "warn" : "good"}">${row.level || "info"}</span></td>
             <td class="mono">${row.event || ""}</td>
             <td>${row.chat_username || ""}</td>
@@ -157,7 +170,7 @@
           <tbody id="logs">
             {% for r in rows %}
               <tr>
-                <td class="small">{{ r.created_at }}</td>
+                <td class="small">{{ msk_hhmm(r.created_at) }}</td>
                 <td>
                   {% if r.level == "error" %}
                     <span class="pill bad">{{ r.level }}</span>

@@ -90,7 +90,7 @@
           <tbody>
             {% for r in rows %}
             <tr>
-              <td class="small">{{ r.updated_at }}</td>
+              <td class="small">{{ msk_hhmm(r.updated_at) }}</td>
               <td>
                 {% if r.status == "kept" %}
                   <span class="pill good">{{ r.status }}</span>

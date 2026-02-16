@@ -105,7 +105,7 @@
           {% for r in rows %}
             <tr>
               <td class="mono">{{ r.id }}</td>
-              <td class="small">{{ r.created_at }}</td>
+              <td class="small">{{ msk_hhmm(r.created_at) }}</td>
               <td>
                 {% if r.status.value == "done" %}
                   <span class="pill good">done</span>

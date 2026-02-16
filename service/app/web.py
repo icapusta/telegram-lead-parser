@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -30,6 +30,7 @@ from .tg_bot_api import set_webhook, answer_callback_query, edit_message_reply_m
 app = FastAPI(title="telegram-lead-parser", version="0.1.0")
 templates = Jinja2Templates(directory="templates")
 security = HTTPBasic()
+MSK_TZ = timezone(timedelta(hours=3))
 
 DEFAULT_DISCOVERY_QUERIES_TEXT = (
     "ищу подрядчика\n"
@@ -253,6 +254,17 @@ DEFAULT_DISCOVERY_QUERIES_TEXT = (
     "масштабирование b2b продаж чат\n"
     "масштабирование строительного бизнеса чат\n"
 )
+
+
+def msk_hhmm(dt: datetime | None) -> str:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(MSK_TZ).strftime("%H:%M")
+
+
+templates.env.globals["msk_hhmm"] = msk_hhmm
 
 
 @app.on_event("startup")

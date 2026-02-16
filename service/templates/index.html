@@ -94,6 +94,7 @@
               <th>When</th>
               <th>Status</th>
               <th>Lead</th>
+              <th>Feedback</th>
               <th>Text</th>
               <th>Model</th>
               <th>Actions</th>
@@ -125,6 +126,18 @@
                 {% endif %}
                 {% if r.notified %}
                   <div class="small">notified</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.feedback == "lead" %}
+                  <span class="pill good">lead</span>
+                {% elif r.feedback == "not_lead" %}
+                  <span class="pill bad">not_lead</span>
+                {% else %}
+                  <span class="pill">-</span>
+                {% endif %}
+                {% if r.stopwords_added %}
+                  <div class="small" title="{{ r.stopwords_added }}">stopwords+</div>
                 {% endif %}
               </td>
               <td>

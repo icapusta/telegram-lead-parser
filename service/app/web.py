@@ -17,7 +17,7 @@ from .models import TgMonitorEvent, EventStatus, AppSettings
 from .schemas import TgMonitorPayload
 from .filtering import hard_filter
 from .llm import classify, suggest_stopwords
-from .notify import send_lead_notification, utcnow
+from .notify import send_event_notification, utcnow
 from .tg_bot_api import set_webhook, answer_callback_query, edit_message_reply_markup, send_message_html
 
 
@@ -184,10 +184,16 @@ async def process_event(event_id: int) -> None:
             ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
             ev.status = EventStatus.done
 
-            if res.is_lead:
+            if res.is_lead or settings.tg_notify_all:
                 excerpt = (ev.text or "").strip().replace("\n", " ")[:240]
                 try:
-                    await send_lead_notification(event_id=ev.id or event_id, excerpt=excerpt, summary=ev.summary, link=ev.link)
+                    await send_event_notification(
+                        event_id=ev.id or event_id,
+                        excerpt=excerpt,
+                        summary=ev.summary,
+                        link=ev.link,
+                        is_lead=ev.is_lead,
+                    )
                     ev.notified = True
                     ev.notified_at = utcnow()
                 except Exception as e:
@@ -271,11 +277,12 @@ async def retry_event(event_id: int, db=Depends(_db), _auth=Depends(_require_aut
 @app.post("/api/test/notify")
 async def test_notify(_auth=Depends(_require_auth)) -> JSONResponse:
     # Minimal smoke test to validate bot credentials and outbound connectivity.
-    await send_lead_notification(
+    await send_event_notification(
         event_id=0,
-        excerpt="TEST lead notification",
+        excerpt="TEST notification",
         summary="Если ты видишь это сообщение, значит уведомления настроены правильно.",
         link=settings.public_base_url.rstrip("/") + "/",
+        is_lead=None,
     )
     return JSONResponse({"ok": True})
 

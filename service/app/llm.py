@@ -99,14 +99,15 @@ def _auth_headers() -> dict[str, str]:
 def _build_prompt(text: str) -> str:
     text = text.strip()
     return (
-        "You filter incoming Telegram messages and decide whether the author is looking for a contractor/executor for software development or integrations.\n"
-        "Return STRICT JSON (no extra text) in the format:\n"
-        '{\"is_lead\": true|false, \"summary\": \"1-2 sentences in Russian\", \"confidence\": 0.0-1.0}\n\n'
-        "Requirements:\n"
-        "- summary MUST be Russian only.\n"
-        "- No markdown.\n"
-        "- No newlines inside summary.\n\n"
-        f"Message:\n{text}\n"
+        "Ты фильтруешь входящие сообщения из Telegram и определяешь: ищет ли автор исполнителя/подрядчика\n"
+        "на разработку, внедрение, CRM, интеграции (1C, amoCRM, Bitrix24), автоматизации, сложные API и т.п.\n\n"
+        "Верни СТРОГО JSON (без лишнего текста) в формате:\n"
+        '{"is_lead": true|false, "summary": "1-2 предложения на русском", "confidence": 0.0-1.0}\n\n'
+        "Требования:\n"
+        "- summary должен быть только на русском языке (без английских слов; бренды можно).\n"
+        "- Без markdown.\n"
+        "- Без переводов строк внутри summary.\n\n"
+        f"Сообщение:\n{text}\n"
     )
 
 

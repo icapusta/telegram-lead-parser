@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     tg_chat_id: str = Field(default="", validation_alias="TG_CHAT_ID")
     tg_webhook_secret: str = Field(default="", validation_alias="TG_WEBHOOK_SECRET")
     tg_webhook_url: str = Field(default="", validation_alias="TG_WEBHOOK_URL")
+    # If true, notify to the bot for every message that passed hard-filter and was processed
+    # by the LLM (not only when the model decided it's a lead).
+    tg_notify_all: bool = Field(default=True, validation_alias="TG_NOTIFY_ALL")
 
     # LLM routing / retries
     llm_max_attempts: int = 3

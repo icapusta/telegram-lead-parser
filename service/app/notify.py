@@ -20,6 +20,11 @@ def _escape_html(s: str) -> str:
 
 
 async def send_lead_notification(*, event_id: int, excerpt: str, summary: str, link: str) -> None:
+    # Backward-compatible helper: "lead" notification.
+    await send_event_notification(event_id=event_id, excerpt=excerpt, summary=summary, link=link, is_lead=True)
+
+
+async def send_event_notification(*, event_id: int, excerpt: str, summary: str, link: str, is_lead: bool | None) -> None:
     if not settings.tg_bot_token or not settings.tg_chat_id:
         raise RuntimeError("tg_bot_token/tg_chat_id not set")
 
@@ -28,6 +33,12 @@ async def send_lead_notification(*, event_id: int, excerpt: str, summary: str, l
     link = (link or "").strip()
 
     parts: list[str] = []
+
+    if is_lead is True:
+        parts.append("<b>Решение:</b> Лид")
+    elif is_lead is False:
+        parts.append("<b>Решение:</b> Не лид")
+
     if excerpt:
         parts.append(f"<b>Запрос:</b> {_escape_html(excerpt)}")
     if summary:
@@ -36,14 +47,15 @@ async def send_lead_notification(*, event_id: int, excerpt: str, summary: str, l
         safe_link = _escape_html(link)
         parts.append(f"<b>Ссылка:</b> <a href=\"{safe_link}\">открыть</a>")
 
-    text = "\n\n".join(parts) if parts else "Lead"
+    text = "\n\n".join(parts) if parts else "Event"
 
     reply_markup = {
         "inline_keyboard": [
-            [{"text": "Лид", "callback_data": f"fb:lead:{event_id}"}],
-            [{"text": "Не лид", "callback_data": f"fb:not_lead:{event_id}"}],
+            [
+                {"text": "Лид", "callback_data": f"fb:lead:{event_id}"},
+                {"text": "Не лид", "callback_data": f"fb:not_lead:{event_id}"},
+            ],
         ]
     }
 
     await send_message_html(chat_id=settings.tg_chat_id, html=text, reply_markup=reply_markup)
-

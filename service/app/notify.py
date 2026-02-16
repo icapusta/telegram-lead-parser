@@ -31,6 +31,15 @@ def _trim(s: str, max_len: int) -> str:
     return cut.rstrip() + "…"
 
 
+def _compact_text(s: str) -> str:
+    # Collapse long multi-line content into readable compact text for Telegram.
+    s = (s or "").replace("\r", "\n")
+    s = " ".join(part.strip() for part in s.splitlines() if part.strip())
+    while "  " in s:
+        s = s.replace("  ", " ")
+    return s.strip()
+
+
 async def send_lead_notification(*, event_id: int, excerpt: str, summary: str, link: str) -> None:
     # Backward-compatible helper: "lead" notification.
     await send_event_notification(event_id=event_id, excerpt=excerpt, summary=summary, link=link, is_lead=True)
@@ -40,7 +49,7 @@ async def send_event_notification(*, event_id: int, excerpt: str, summary: str, 
     if not settings.tg_bot_token or not settings.tg_chat_id:
         raise RuntimeError("tg_bot_token/tg_chat_id not set")
 
-    excerpt = _trim(excerpt, 700)
+    excerpt = _trim(_compact_text(excerpt), 260)
     summary = _trim(summary, 240)
     link = (link or "").strip()
 
@@ -54,8 +63,7 @@ async def send_event_notification(*, event_id: int, excerpt: str, summary: str, 
         parts.append(f"<b>Сообщение</b>  <code>#{event_id}</code>")
 
     if excerpt:
-        # Use <pre> to keep the message readable (wrap + line breaks).
-        parts.append("<b>Запрос</b>\n<pre>" + _escape_html(excerpt) + "</pre>")
+        parts.append("<b>Запрос</b>\n" + _escape_html(excerpt))
     if summary:
         parts.append("<b>Кратко</b>\n" + _escape_html(summary))
     if link:

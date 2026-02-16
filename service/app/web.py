@@ -237,3 +237,14 @@ async def retry_event(event_id: int, db=Depends(_db), _auth=Depends(_require_aut
     db.commit()
     await _process_event(event_id, db)
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/test/notify")
+async def test_notify(_auth=Depends(_require_auth)) -> JSONResponse:
+    # Minimal smoke test to validate bot credentials and outbound connectivity.
+    await send_lead_notification(
+        excerpt="TEST lead notification",
+        summary="If you see this message, bot notify is wired correctly.",
+        link=settings.public_base_url.rstrip("/") + "/",
+    )
+    return JSONResponse({"ok": True})

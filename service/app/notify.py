@@ -49,7 +49,7 @@ async def send_event_notification(*, event_id: int, excerpt: str, summary: str, 
     if not settings.tg_bot_token or not settings.tg_chat_id:
         raise RuntimeError("tg_bot_token/tg_chat_id not set")
 
-    excerpt = _trim(_compact_text(excerpt), 260)
+    excerpt = _trim(_compact_text(excerpt), 180)
     summary = _trim(summary, 240)
     link = (link or "").strip()
 
@@ -63,7 +63,7 @@ async def send_event_notification(*, event_id: int, excerpt: str, summary: str, 
         parts.append(f"<b>Сообщение</b>  <code>#{event_id}</code>")
 
     if excerpt:
-        parts.append("<b>Запрос</b>\n" + _escape_html(excerpt))
+        parts.append("<b>Запрос</b>\n<code>" + _escape_html(excerpt) + "</code>")
     if summary:
         parts.append("<b>Кратко</b>\n" + _escape_html(summary))
     if link:

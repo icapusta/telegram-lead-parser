@@ -31,5 +31,9 @@ class Settings(BaseSettings):
     # If true, never use models whose owned_by == "openai" (Codex accounts are there too).
     exclude_openai_owned_models: bool = True
 
+    # Web UI auth (HTTP Basic). If user is empty, auth is disabled.
+    auth_user: str = Field(default="", validation_alias="APP_AUTH_USER")
+    auth_pass: str = Field(default="", validation_alias="APP_AUTH_PASS")
+
 
 settings = Settings()

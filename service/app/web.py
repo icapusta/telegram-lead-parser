@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from sqlmodel import select
 
@@ -19,6 +21,7 @@ from .notify import send_lead_notification, utcnow
 
 app = FastAPI(title="telegram-lead-parser", version="0.1.0")
 templates = Jinja2Templates(directory="templates")
+security = HTTPBasic()
 
 
 @app.on_event("startup")
@@ -29,6 +32,24 @@ def _startup() -> None:
 def _db():
     with session() as s:
         yield s
+
+
+def _require_auth(creds: HTTPBasicCredentials = Depends(security)) -> None:
+    """
+    Protect UI endpoints with Basic auth. Ingest stays open for tg-monitor.
+    If auth_user is empty, auth is disabled (useful for local dev).
+    """
+    if not settings.auth_user:
+        return
+    ok_user = secrets.compare_digest(creds.username or "", settings.auth_user)
+    ok_pass = secrets.compare_digest(creds.password or "", settings.auth_pass)
+    if ok_user and ok_pass:
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="unauthorized",
+        headers={"WWW-Authenticate": "Basic"},
+    )
 
 
 def _get_settings(db) -> AppSettings:
@@ -155,7 +176,7 @@ async def _process_event(event_id: int, db) -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, db=Depends(_db)):
+def dashboard(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
     rows = db.exec(
         select(TgMonitorEvent).order_by(TgMonitorEvent.created_at.desc()).limit(200)
     ).all()
@@ -172,7 +193,7 @@ def dashboard(request: Request, db=Depends(_db)):
 
 
 @app.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request, db=Depends(_db)):
+def settings_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
     cfg = _get_settings(db)
     return templates.TemplateResponse(
         request,
@@ -192,6 +213,7 @@ def update_settings(
     keywords_text: str = Form(""),
     stopwords_text: str = Form(""),
     db=Depends(_db),
+    _auth=Depends(_require_auth),
 ):
     cfg = _get_settings(db)
     cfg.keywords_enabled = bool(keywords_enabled)
@@ -205,7 +227,7 @@ def update_settings(
 
 
 @app.post("/api/events/{event_id}/retry")
-async def retry_event(event_id: int, db=Depends(_db)) -> JSONResponse:
+async def retry_event(event_id: int, db=Depends(_db), _auth=Depends(_require_auth)) -> JSONResponse:
     row = db.exec(select(TgMonitorEvent).where(TgMonitorEvent.id == event_id)).first()
     if not row:
         raise HTTPException(status_code=404, detail="not found")

@@ -44,6 +44,16 @@ templates = Jinja2Templates(directory="templates")
 security = HTTPBasic()
 MSK_TZ = timezone(timedelta(hours=3))
 
+
+@app.middleware("http")
+async def no_cache_middleware(request: Request, call_next):
+    response = await call_next(request)
+    # UI/JSON should always reflect latest deploy/settings without stale browser cache.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 DEFAULT_DISCOVERY_QUERIES_TEXT = (
     "ищу подрядчика\n"
     "нужен специалист\n"

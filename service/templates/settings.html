@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Parser Settings</title>
+    <title>Настройки парсера</title>
     <script>
       (function () {
         const key = "theme";
@@ -31,15 +31,15 @@
       }
       async function loadLLMModels() {
         const wrap = document.getElementById("llm-models-wrap");
-        wrap.innerHTML = "<div class='hint'>Loading models...</div>";
+        wrap.innerHTML = "<div class='hint'>Загрузка моделей...</div>";
         const r = await fetch("/api/llm/models");
         if (!r.ok) {
-          wrap.innerHTML = "<div class='hint'>Failed to load models</div>";
+          wrap.innerHTML = "<div class='hint'>Не удалось загрузить модели</div>";
           return;
         }
         const data = await r.json();
         if (!Array.isArray(data) || data.length === 0) {
-          wrap.innerHTML = "<div class='hint'>No models returned by Cliapiproxy</div>";
+          wrap.innerHTML = "<div class='hint'>Cliapiproxy не вернул модели</div>";
           return;
         }
         const rows = data.map((m) => `
@@ -47,13 +47,13 @@
             <td><input type="checkbox" name="llm_model_pick" value="${esc(m.id)}" ${m.in_priority ? "checked" : ""}></td>
             <td class="mono">${esc(m.id)}</td>
             <td>${esc(m.owned_by || "")}</td>
-            <td>${m.allowed ? "<span class='ok'>allowed</span>" : "<span class='bad'>blocked</span>"}</td>
+            <td>${m.allowed ? "<span class='ok'>разрешена</span>" : "<span class='bad'>заблокирована</span>"}</td>
             <td>${esc(m.block_reason || "")}</td>
             <td class="mono test-status">-</td>
             <td class="mono test-latency">-</td>
             <td class="mono test-limits">-</td>
             <td class="mono test-error">-</td>
-            <td><button class="btn" type="button" onclick="testOneModel('${esc(m.id)}')">Test</button></td>
+            <td><button class="btn" type="button" onclick="testOneModel('${esc(m.id)}')">Тест</button></td>
           </tr>
         `).join("");
         wrap.innerHTML = `
@@ -62,15 +62,15 @@
               <thead>
                 <tr>
                   <th></th>
-                  <th>Model</th>
-                  <th>Owned by</th>
-                  <th>Policy</th>
-                  <th>Reason</th>
+                  <th>Модель</th>
+                  <th>Провайдер</th>
+                  <th>Политика</th>
+                  <th>Причина</th>
                   <th>HTTP</th>
-                  <th>Latency</th>
-                  <th>Limits</th>
-                  <th>Error</th>
-                  <th>Action</th>
+                  <th>Задержка</th>
+                  <th>Лимиты</th>
+                  <th>Ошибка</th>
+                  <th>Действие</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -82,7 +82,7 @@
         const tr = document.querySelector(`tr[data-model-id="${CSS.escape(res.model_id || "")}"]`);
         if (!tr) return;
         tr.querySelector(".test-status").textContent = res.status_code || 0;
-        tr.querySelector(".test-latency").textContent = (res.latency_ms || 0) + "ms";
+        tr.querySelector(".test-latency").textContent = (res.latency_ms || 0) + "мс";
         const lim = res.rate_limits || {};
         const limText = [
           lim["x-ratelimit-limit-requests"] ? `req:${lim["x-ratelimit-remaining-requests"] || "?"}/${lim["x-ratelimit-limit-requests"]}` : "",
@@ -185,71 +185,71 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>Settings</h1>
+          <h1>Настройки</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Dashboard</a>
-          <a class="btn" href="/discovery">Discovery</a>
-          <a class="btn" href="/discovery/targets">Found Targets</a>
-          <button class="btn" onclick="toggleTheme()">Toggle theme</button>
+          <a class="btn" href="/">Дашборд</a>
+          <a class="btn" href="/discovery">Дискавери</a>
+          <a class="btn" href="/discovery/targets">Найденные площадки</a>
+          <button class="btn" onclick="toggleTheme()">Сменить тему</button>
         </div>
       </div>
 
       <div class="card">
         <form method="post" action="/settings">
           <div class="toggles">
-            <label class="toggle"><input type="checkbox" name="keywords_enabled" value="true" {% if cfg.keywords_enabled %}checked{% endif %}/> Keywords filter</label>
-            <label class="toggle"><input type="checkbox" name="stopwords_enabled" value="true" {% if cfg.stopwords_enabled %}checked{% endif %}/> Stopwords filter</label>
-            <label class="toggle"><input type="checkbox" name="llm_enabled" value="true" {% if cfg.llm_enabled %}checked{% endif %}/> LLM classify</label>
+            <label class="toggle"><input type="checkbox" name="keywords_enabled" value="true" {% if cfg.keywords_enabled %}checked{% endif %}/> Фильтр ключевых слов</label>
+            <label class="toggle"><input type="checkbox" name="stopwords_enabled" value="true" {% if cfg.stopwords_enabled %}checked{% endif %}/> Фильтр стоп-слов</label>
+            <label class="toggle"><input type="checkbox" name="llm_enabled" value="true" {% if cfg.llm_enabled %}checked{% endif %}/> LLM-классификация</label>
           </div>
 
           <div class="row">
             <div>
-              <label>Keywords (one per line). If enabled and list is non-empty, message must contain at least one.</label>
+              <label>Ключевые слова (по одному на строку). Если фильтр включен и список не пустой, сообщение должно содержать хотя бы одно слово.</label>
               <textarea name="keywords_text" spellcheck="false">{{ cfg.keywords_text }}</textarea>
             </div>
             <div>
-              <label>Stopwords (one per line). If enabled and list is non-empty, any match blocks the message.</label>
+              <label>Стоп-слова (по одному на строку). Если фильтр включен и список не пустой, любое совпадение блокирует сообщение.</label>
               <textarea name="stopwords_text" spellcheck="false">{{ cfg.stopwords_text }}</textarea>
             </div>
           </div>
 
           <div class="row" style="margin-top:12px;">
             <div>
-              <label>LLM model routing priority (one model id per line).</label>
+              <label>Приоритет моделей LLM (по одному id модели на строку).</label>
               <textarea name="llm_model_priority_text" spellcheck="false">{{ cfg.llm_model_priority_text }}</textarea>
             </div>
             <div>
-              <label>LLM max attempts (models per message)</label>
+              <label>Макс. попыток LLM (моделей на сообщение)</label>
               <input type="number" min="1" max="12" name="llm_max_attempts" value="{{ cfg.llm_max_attempts }}" />
-              <label style="margin-top:10px;">LLM timeout (sec, per model request)</label>
+              <label style="margin-top:10px;">Таймаут LLM (сек на запрос)</label>
               <input type="number" min="3" max="90" step="1" name="llm_timeout_s" value="{{ cfg.llm_timeout_s }}" />
               <div class="toggles" style="margin-top:12px;">
-                <label class="toggle"><input type="checkbox" name="exclude_openai_owned_models" value="true" {% if cfg.exclude_openai_owned_models %}checked{% endif %}/> Exclude models where owned_by=openai</label>
+                <label class="toggle"><input type="checkbox" name="exclude_openai_owned_models" value="true" {% if cfg.exclude_openai_owned_models %}checked{% endif %}/> Исключать модели с owned_by=openai</label>
               </div>
-              <div class="hint">Routing applies to lead classification and auto stop-word suggestions.</div>
+              <div class="hint">Маршрутизация применяется к классификации лидов и авто-обновлению стоп-слов.</div>
             </div>
           </div>
 
           <div class="row row-full" style="margin-top:12px;">
             <div style="flex: 1 1 100%;">
-              <label>Cliapiproxy models and availability tests</label>
+              <label>Модели Cliapiproxy и проверка доступности</label>
               <div class="head-actions">
-                <button class="btn" type="button" onclick="loadLLMModels()">Load models</button>
-                <button class="btn" type="button" onclick="testSelectedModels()">Test selected</button>
-                <button class="btn" type="button" onclick="testAllLoadedModels()">Test all loaded</button>
+                <button class="btn" type="button" onclick="loadLLMModels()">Загрузить модели</button>
+                <button class="btn" type="button" onclick="testSelectedModels()">Тест выбранных</button>
+                <button class="btn" type="button" onclick="testAllLoadedModels()">Тест всех загруженных</button>
               </div>
-              <div id="llm-models-wrap" class="hint">Click "Load models" to fetch all available models from Cliapiproxy.</div>
+              <div id="llm-models-wrap" class="hint">Нажми «Загрузить модели», чтобы получить полный список из Cliapiproxy.</div>
             </div>
           </div>
 
           <div class="save">
-            <button class="btn" type="submit">Save</button>
+            <button class="btn" type="submit">Сохранить</button>
           </div>
         </form>
 
         <div class="hint">
-          Ingest endpoint: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
+          URL приёма сообщений: <span class="mono">{{ public_base_url }}/api/ingest/tg-monitor</span>
         </div>
       </div>
     </div>

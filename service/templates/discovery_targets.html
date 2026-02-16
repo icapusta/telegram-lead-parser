@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Discovery Targets</title>
+    <title>Найденные площадки</title>
     <script>
       (function () {
         const key = "theme";
@@ -65,13 +65,13 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>Found Targets</h1>
+          <h1>Найденные площадки</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Dashboard</a>
-          <a class="btn" href="/discovery">Discovery</a>
-          <a class="btn" href="/settings">Settings</a>
-          <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
+          <a class="btn" href="/">Дашборд</a>
+          <a class="btn" href="/discovery">Дискавери</a>
+          <a class="btn" href="/settings">Настройки</a>
+          <button class="btn" type="button" onclick="toggleTheme()">Сменить тему</button>
         </div>
       </div>
 
@@ -81,18 +81,18 @@
         <table>
           <thead>
             <tr>
-              <th>Updated</th>
-              <th>Status</th>
+              <th>Обновлено</th>
+              <th>Статус</th>
               <th>Вступал</th>
               <th>Результат проверки</th>
               <th>Очередь</th>
-              <th>Source</th>
-              <th>Target</th>
+              <th>Источник</th>
+              <th>Цель</th>
               <th>Username</th>
-              <th>Query</th>
-              <th>Note</th>
-              <th>Key</th>
-              <th>Action</th>
+              <th>Запрос</th>
+              <th>Примечание</th>
+              <th>Ключ</th>
+              <th>Действие</th>
             </tr>
           </thead>
           <tbody>
@@ -130,7 +130,7 @@
               </td>
               <td>
                 {% if r.queued_join_scan %}
-                  <span class="pill warn">queued</span>
+                  <span class="pill warn">в очереди</span>
                 {% else %}
                   <span class="pill">-</span>
                 {% endif %}

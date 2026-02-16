@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Discovery</title>
+    <title>Дискавери</title>
     <script>
       (function () {
         const key = "theme";
@@ -81,12 +81,8 @@
       .brand h1 { margin:0; font-size:18px; }
       .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
-      .stats { display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:10px; margin-top:14px; }
-      .stat { border:1px solid var(--border); background:var(--panel); border-radius:12px; padding:12px; }
-      .stat .k { font-size:11px; color:var(--muted); }
-      .stat .v { margin-top:6px; font-size:24px; font-weight:700; line-height:1; }
       .grid { display:grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap:12px; }
-      @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr; } }
+      @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
       label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
       input[type="number"], textarea { width:100%; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:10px; padding:8px; font-size:12px; }
       textarea { min-height:150px; resize:vertical; font-family:var(--mono); }
@@ -109,56 +105,22 @@
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <h1>Discovery</h1>
+          <h1>Дискавери</h1>
         </div>
         <div class="head-actions">
-          <a class="btn" href="/">Dashboard</a>
-          <a class="btn" href="/settings">Settings</a>
-          <a class="btn" href="/discovery/targets">Found Targets</a>
-          <button class="btn" type="button" onclick="refreshLogs()">Refresh logs</button>
-          <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
-        </div>
-      </div>
-
-      <div class="stats">
-        <div class="stat">
-          <div class="k">Всего сообщений</div>
-          <div class="v">{{ stats.total_messages }}</div>
-        </div>
-        <div class="stat">
-          <div class="k">Лидов за день</div>
-          <div class="v">{{ stats.leads_day }}</div>
-        </div>
-        <div class="stat">
-          <div class="k">Лидов за неделю</div>
-          <div class="v">{{ stats.leads_week }}</div>
-        </div>
-        <div class="stat">
-          <div class="k">Лидов за месяц</div>
-          <div class="v">{{ stats.leads_month }}</div>
-        </div>
-      </div>
-
-      <div class="stats">
-        <div class="stat">
-          <div class="k">Добавлено за день</div>
-          <div class="v">{{ stats.added_today }}</div>
-        </div>
-        <div class="stat">
-          <div class="k">Вступлений за день</div>
-          <div class="v">{{ stats.joins_today }}</div>
-        </div>
-        <div class="stat">
-          <div class="k">Выходов за день</div>
-          <div class="v">{{ stats.leaves_today }}</div>
+          <a class="btn" href="/">Дашборд</a>
+          <a class="btn" href="/settings">Настройки</a>
+          <a class="btn" href="/discovery/targets">Найденные площадки</a>
+          <button class="btn" type="button" onclick="refreshLogs()">Обновить логи</button>
+          <button class="btn" type="button" onclick="toggleTheme()">Сменить тему</button>
         </div>
       </div>
 
       <div class="card">
         <form method="post" action="/discovery">
           <div class="toggles">
-            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Discovery enabled</label>
-            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> Auto leave if no leads</label>
+            <label class="toggle"><input type="checkbox" name="discovery_enabled" value="true" {% if cfg.discovery_enabled %}checked{% endif %}/> Дискавери включен</label>
+            <label class="toggle"><input type="checkbox" name="auto_leave_if_no_candidates" value="true" {% if cfg.auto_leave_if_no_candidates %}checked{% endif %}/> Автовыход при отсутствии лидов</label>
           </div>
           <div class="grid">
             <div>
@@ -166,42 +128,42 @@
               <textarea name="discovery_queries_text" spellcheck="false">{{ cfg.discovery_queries_text }}</textarea>
             </div>
             <div>
-              <label>Discovery interval (сек)</label>
+              <label>Интервал дискавери (сек)</label>
               <input type="number" min="60" name="discovery_interval_s" value="{{ cfg.discovery_interval_s }}" />
-              <label style="margin-top:10px;">Scan days</label>
+              <label style="margin-top:10px;">Глубина сканирования (дни)</label>
               <input type="number" min="1" name="scan_days" value="{{ cfg.scan_days }}" />
-              <label style="margin-top:10px;">Scan max messages</label>
+              <label style="margin-top:10px;">Максимум сообщений на скан</label>
               <input type="number" min="30" name="scan_max_messages" value="{{ cfg.scan_max_messages }}" />
-              <label style="margin-top:10px;">LLM sample size</label>
+              <label style="margin-top:10px;">Размер LLM-выборки</label>
               <input type="number" min="1" name="scan_llm_sample" value="{{ cfg.scan_llm_sample }}" />
-              <label style="margin-top:10px;">Join per day</label>
+              <label style="margin-top:10px;">Вступлений в день</label>
               <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
-              <label style="margin-top:10px;">Join per hour</label>
+              <label style="margin-top:10px;">Вступлений в час</label>
               <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
-              <label style="margin-top:10px;">Search requests per day</label>
+              <label style="margin-top:10px;">Поисковых запросов в день</label>
               <input type="number" min="20" name="search_requests_per_day" value="{{ cfg.search_requests_per_day }}" />
-              <label style="margin-top:10px;">Search requests per hour</label>
+              <label style="margin-top:10px;">Поисковых запросов в час</label>
               <input type="number" min="5" name="search_requests_per_hour" value="{{ cfg.search_requests_per_hour }}" />
-              <label style="margin-top:10px;">Queries per tick</label>
+              <label style="margin-top:10px;">Запросов за тик</label>
               <input type="number" min="1" name="queries_per_tick" value="{{ cfg.queries_per_tick }}" />
-              <label style="margin-top:10px;">Search results per query</label>
+              <label style="margin-top:10px;">Результатов на запрос</label>
               <input type="number" min="5" max="50" name="search_results_per_query" value="{{ cfg.search_results_per_query }}" />
             </div>
           </div>
           <div class="save">
-            <button class="btn" type="submit">Save discovery settings</button>
+            <button class="btn" type="submit">Сохранить настройки дискавери</button>
           </div>
         </form>
-        <div class="small" style="margin-top:16px; margin-bottom:10px;">Последние 200 событий discovery</div>
+        <div class="small" style="margin-top:16px; margin-bottom:10px;">Последние 200 событий дискавери</div>
         <table>
           <thead>
             <tr>
-              <th>When</th>
-              <th>Level</th>
-              <th>Event</th>
-              <th>Chat</th>
-              <th>Query</th>
-              <th>Message</th>
+              <th>Время</th>
+              <th>Уровень</th>
+              <th>Событие</th>
+              <th>Чат</th>
+              <th>Запрос</th>
+              <th>Сообщение</th>
             </tr>
           </thead>
           <tbody id="logs">

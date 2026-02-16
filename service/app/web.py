@@ -15,7 +15,7 @@ from .config import settings
 from .db import init_db, session
 from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog
 from .schemas import TgMonitorPayload, InternalClassifyRequest, InternalClassifyResponse, InternalDiscoveryLogRequest
-from .filtering import hard_filter
+from .filtering import hard_filter, request_intent_filter
 from .llm import classify, suggest_stopwords
 from .notify import send_event_notification, utcnow
 from .tg_bot_api import set_webhook, answer_callback_query, edit_message_reply_markup, send_message_html
@@ -156,6 +156,16 @@ async def internal_classify(req: InternalClassifyRequest, db=Depends(_db), _it=D
         keywords_text=cfg.keywords_text,
         stopwords_text=cfg.stopwords_text,
     )
+    intent = request_intent_filter(text=req.text)
+    if not intent.passed:
+        return InternalClassifyResponse(
+            passed_hard_filter=False,
+            hard_filter_reason=intent.reason,
+            is_lead=False,
+            summary=f"hard_filter:{intent.reason}",
+            confidence=None,
+            model_used="hard-filter",
+        )
     if not hf.passed:
         return InternalClassifyResponse(
             passed_hard_filter=False,
@@ -206,6 +216,17 @@ async def process_event(event_id: int) -> None:
                 keywords_text=cfg.keywords_text,
                 stopwords_text=cfg.stopwords_text,
             )
+            intent = request_intent_filter(text=ev.text)
+            if not intent.passed:
+                ev.is_lead = False
+                ev.summary = f"hard_filter:{intent.reason}"
+                ev.confidence = None
+                ev.model_used = "hard-filter"
+                ev.attempts = min(settings.llm_max_attempts, ev.attempts + 1)
+                ev.status = EventStatus.done
+                db.add(ev)
+                db.commit()
+                return
 
             if not hf.passed:
                 ev.is_lead = False

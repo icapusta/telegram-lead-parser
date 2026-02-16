@@ -99,15 +99,17 @@ def _auth_headers() -> dict[str, str]:
 def _build_prompt(text: str) -> str:
     text = text.strip()
     return (
-        "Ты фильтруешь входящие сообщения из Telegram и определяешь: ищет ли автор исполнителя/подрядчика\n"
-        "на разработку, внедрение, CRM, интеграции (1C, amoCRM, Bitrix24), автоматизации, сложные API и т.п.\n\n"
-        "Верни СТРОГО JSON (без лишнего текста) в формате:\n"
-        '{"is_lead": true|false, "summary": "1-2 предложения на русском", "confidence": 0.0-1.0}\n\n'
-        "Требования:\n"
-        "- summary должен быть только на русском языке (без английских слов; бренды можно).\n"
-        "- Без markdown.\n"
-        "- Без переводов строк внутри summary.\n\n"
-        f"Сообщение:\n{text}\n"
+        "You classify incoming Telegram messages.\n"
+        "Lead=true only if the author is looking for an executor/contractor/vendor for development/integrations/CRM/API work.\n"
+        "Lead=false if the author offers own services, posts a portfolio/resume, sells leads/contacts, or publishes generic advertising.\n\n"
+        "Return STRICT JSON only:\n"
+        '{"is_lead": true|false, "summary": "1-2 sentences in Russian", "confidence": 0.0-1.0}\n\n'
+        "Rules:\n"
+        "- summary must be in Russian.\n"
+        "- no markdown.\n"
+        "- no newlines in summary.\n"
+        "- if uncertain between request vs self-promo, choose false.\n\n"
+        f"Message:\n{text}\n"
     )
 
 
@@ -237,6 +239,23 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                     raise RuntimeError("stopwords is not a list")
 
                 out: list[str] = []
+                protected_substrings = [
+                    "битрикс",
+                    "bitrix",
+                    "битрикс24",
+                    "amocrm",
+                    "amo crm",
+                    "1с",
+                    "crm",
+                    "api",
+                    "n8n",
+                    "интеграц",
+                    "разработ",
+                    "внедрен",
+                    "автоматиз",
+                    "вебхук",
+                    "webhook",
+                ]
                 seen: set[str] = set(x.casefold() for x in existing)
                 for item in arr:
                     if not isinstance(item, str):
@@ -246,9 +265,12 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                         continue
                     if len(w) < 3:
                         continue
+                    wc = w.casefold()
+                    if any(ps in wc for ps in protected_substrings):
+                        continue
                     if w.casefold() in seen:
                         continue
-                    seen.add(w.casefold())
+                    seen.add(wc)
                     out.append(w)
                     if len(out) >= 6:
                         break

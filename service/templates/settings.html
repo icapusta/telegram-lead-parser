@@ -94,10 +94,18 @@
             enabled: true,
             timeout_s: Number(document.querySelector("input[name='llm_timeout_s']").value || 15),
             link: opts.link || guessModelLink(modelId),
-            notes: opts.notes || ""
+            notes: opts.notes || "",
+            provider_id: opts.provider_id || "",
+            base_url: opts.base_url || "",
+            api_key: opts.api_key || "",
           };
-          saveModelCfg(cfg);
         }
+        if (opts.provider_id) cfg[modelId].provider_id = opts.provider_id;
+        if (opts.base_url) cfg[modelId].base_url = opts.base_url;
+        if (opts.api_key) cfg[modelId].api_key = opts.api_key;
+        if (opts.link) cfg[modelId].link = opts.link;
+        if (opts.notes) cfg[modelId].notes = opts.notes;
+        saveModelCfg(cfg);
       }
 
       function addModel(modelId, opts = {}) {
@@ -180,13 +188,18 @@
 
       function addSelectedProviderModel() {
         const pid = document.getElementById("provider-id").value;
+        const apiKey = document.getElementById("provider-api-key").value.trim();
+        const baseUrl = document.getElementById("provider-base-url").value.trim();
         const sel = document.getElementById("provider-model-select");
         if (!sel) return;
         const modelId = sel.value || "";
         const meta = providerMetaById(pid);
         addModel(modelId, {
           link: meta ? meta.docs : guessModelLink(modelId),
-          notes: meta ? `provider=${meta.name}` : ""
+          notes: meta ? `provider=${meta.name}` : "",
+          provider_id: pid || "",
+          base_url: baseUrl || "",
+          api_key: apiKey || "",
         });
         closeProviderModal();
       }
@@ -216,12 +229,15 @@
           return;
         }
         const rows = lines.map((mid) => {
-          const c = cfg[mid] || { enabled: true, timeout_s: 15, link: guessModelLink(mid), notes: "" };
+          const c = cfg[mid] || { enabled: true, timeout_s: 15, link: guessModelLink(mid), notes: "", provider_id: "", base_url: "", api_key: "" };
           return `
             <tr>
               <td class="mono">${esc(mid)}</td>
               <td><input type="checkbox" ${c.enabled === false ? "" : "checked"} onchange="updateCfgField('${esc(mid)}','enabled',this.checked)"></td>
               <td><input type="number" min="3" max="120" step="1" value="${Number(c.timeout_s || 15)}" onchange="updateCfgField('${esc(mid)}','timeout_s',Number(this.value||15))"></td>
+              <td><input type="text" value="${esc(c.provider_id || "")}" placeholder="openai/openrouter/cliapiproxy" onchange="updateCfgField('${esc(mid)}','provider_id',this.value)"></td>
+              <td><input type="text" value="${esc(c.base_url || "")}" placeholder="https://api.openai.com/v1" onchange="updateCfgField('${esc(mid)}','base_url',this.value)"></td>
+              <td><input type="password" value="${esc(c.api_key || "")}" placeholder="api key" onchange="updateCfgField('${esc(mid)}','api_key',this.value)"></td>
               <td><input type="text" value="${esc(c.link || guessModelLink(mid))}" onchange="updateCfgField('${esc(mid)}','link',this.value)"></td>
               <td><input type="text" value="${esc(c.notes || "")}" onchange="updateCfgField('${esc(mid)}','notes',this.value)"></td>
               <td><button class="btn" type="button" onclick="removeModel('${esc(mid)}')">Удалить</button></td>
@@ -237,6 +253,9 @@
                   <th>Модель</th>
                   <th>Вкл</th>
                   <th>Таймаут (сек)</th>
+                  <th>Провайдер</th>
+                  <th>Base URL</th>
+                  <th>API key</th>
                   <th>Ссылка</th>
                   <th>Заметка</th>
                   <th>Действие</th>
@@ -281,7 +300,7 @@
           <tr data-model-id="${esc(m.id)}">
             <td><input type="checkbox" name="llm_model_pick" value="${esc(m.id)}" ${m.in_priority ? "checked" : ""}></td>
             <td class="mono">${esc(m.id)}</td>
-            <td>${esc(m.owned_by || "")}</td>
+            <td>${esc(m.provider_id || m.owned_by || "")}</td>
             <td>${m.allowed ? "<span class='ok'>разрешена</span>" : "<span class='bad'>заблокирована</span>"}</td>
             <td>${esc(m.block_reason || "")}</td>
             <td class="mono stat-calls">${Number(m.calls_ok_today || 0)}/${Number(m.calls_error_today || 0)}</td>

@@ -34,6 +34,7 @@ from .llm import (
     model_block_reason,
     test_model_availability,
     LLMRoutingOptions,
+    ModelInfo,
     default_model_priority_text,
 )
 from .notify import send_event_notification, utcnow
@@ -384,6 +385,25 @@ def _llm_opts(cfg: AppSettings) -> LLMRoutingOptions:
     )
 
 
+def _parse_models_cfg_json(raw: str | None) -> dict[str, dict]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not k.strip():
+            continue
+        if not isinstance(v, dict):
+            continue
+        out[k.strip()] = v
+    return out
+
+
 def _utc_day_key(dt: datetime | None = None) -> str:
     now = dt or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -494,18 +514,35 @@ async def llm_models(db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict
     cfg = _get_settings(db)
     preferred = [x.strip() for x in (cfg.llm_model_priority_text or "").splitlines() if x.strip()]
     preferred_set = {x.casefold() for x in preferred}
+    models_cfg = _parse_models_cfg_json(cfg.llm_models_config_json)
     day = _utc_day_key()
     stats_rows = db.exec(select(LLMModelStat).where(LLMModelStat.day_utc == day)).all()
     stats_by_model = {r.model_id.casefold(): r for r in stats_rows}
     async with httpx.AsyncClient() as client:
         models = await list_models(client)
+    # Include manually configured models that may not exist in cliproxy /models (e.g. direct OpenAI).
+    known_ids = {m.id.casefold() for m in models}
+    for mid in preferred:
+        if mid.casefold() in known_ids:
+            continue
+        mc = models_cfg.get(mid) or {}
+        provider_id = str(mc.get("provider_id") or mc.get("provider") or "").strip()
+        if provider_id:
+            models.append(ModelInfo(id=mid, owned_by=provider_id))
+
     out: list[dict] = []
     for m in models:
+        mc = models_cfg.get(m.id) or {}
+        provider_id = str(mc.get("provider_id") or mc.get("provider") or "").strip()
+        has_api_key = bool(str(mc.get("api_key") or "").strip())
         br = model_block_reason(
             model_id=m.id,
             owned_by=m.owned_by,
             exclude_openai_owned_models=bool(cfg.exclude_openai_owned_models),
         )
+        # If user configured direct provider credentials for this model, allow it regardless of cliproxy policy.
+        if provider_id and has_api_key:
+            br = None
         st = stats_by_model.get((m.id or "").casefold())
         rl = {}
         if st and (st.last_rate_limits_json or "").strip():
@@ -520,6 +557,8 @@ async def llm_models(db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict
                 "allowed": br is None,
                 "block_reason": br or "",
                 "in_priority": m.id.casefold() in preferred_set,
+                "provider_id": provider_id,
+                "has_api_key": has_api_key,
                 "calls_ok_today": int(st.calls_ok) if st else 0,
                 "calls_error_today": int(st.calls_error) if st else 0,
                 "tokens_total_today": int(st.total_tokens) if st else 0,
@@ -541,7 +580,18 @@ async def llm_test_model(req: LLMModelTestRequest, db=Depends(_db), _auth=Depend
     cfg = _get_settings(db)
     timeout_s = float(req.timeout_s if req.timeout_s is not None else cfg.llm_timeout_s)
     timeout_s = max(3.0, min(90.0, timeout_s))
-    res = await test_model_availability(model_id=req.model_id.strip(), timeout_s=timeout_s)
+    models_cfg = _parse_models_cfg_json(cfg.llm_models_config_json)
+    mc = models_cfg.get((req.model_id or "").strip()) or {}
+    provider_id = str(mc.get("provider_id") or mc.get("provider") or "").strip()
+    api_key = str(mc.get("api_key") or "").strip()
+    base_url = str(mc.get("base_url") or "").strip()
+    res = await test_model_availability(
+        model_id=req.model_id.strip(),
+        timeout_s=timeout_s,
+        provider_id=provider_id or None,
+        api_key=api_key or None,
+        base_url=base_url or None,
+    )
     _upsert_llm_model_stat(
         db,
         model_id=req.model_id.strip(),
@@ -554,6 +604,7 @@ async def llm_test_model(req: LLMModelTestRequest, db=Depends(_db), _auth=Depend
 @app.post("/api/llm/test-models")
 async def llm_test_models(req: LLMModelsBulkTestRequest, db=Depends(_db), _auth=Depends(_require_auth)) -> dict:
     cfg = _get_settings(db)
+    models_cfg = _parse_models_cfg_json(cfg.llm_models_config_json)
     timeout_s = float(req.timeout_s if req.timeout_s is not None else cfg.llm_timeout_s)
     timeout_s = max(3.0, min(90.0, timeout_s))
     lim = max(1, min(60, int(req.limit or 20)))
@@ -570,7 +621,14 @@ async def llm_test_models(req: LLMModelsBulkTestRequest, db=Depends(_db), _auth=
 
     async def _one(mid: str) -> dict:
         async with sem:
-            return await test_model_availability(model_id=mid, timeout_s=timeout_s)
+            mc = models_cfg.get(mid) or {}
+            return await test_model_availability(
+                model_id=mid,
+                timeout_s=timeout_s,
+                provider_id=str(mc.get("provider_id") or mc.get("provider") or "").strip() or None,
+                api_key=str(mc.get("api_key") or "").strip() or None,
+                base_url=str(mc.get("base_url") or "").strip() or None,
+            )
 
     results = await asyncio.gather(*[_one(mid) for mid in model_ids])
     for r in results:

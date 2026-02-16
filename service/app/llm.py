@@ -147,6 +147,18 @@ def _model_cfg(model_id: str, models_cfg: dict[str, dict]) -> dict:
     return {}
 
 
+def _provider_runtime_cfg(model_id: str, models_cfg: dict[str, dict]) -> dict:
+    cfg = _model_cfg(model_id, models_cfg)
+    provider = str(cfg.get("provider_id") or cfg.get("provider") or "").strip().casefold()
+    api_key = str(cfg.get("api_key") or "").strip()
+    base_url = str(cfg.get("base_url") or "").strip()
+    return {
+        "provider_id": provider,
+        "api_key": api_key,
+        "base_url": base_url,
+    }
+
+
 def _is_model_allowed(mi: ModelInfo, *, exclude_openai_owned_models: bool) -> bool:
     return model_block_reason(
         model_id=mi.id,
@@ -332,6 +344,16 @@ async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple
             preferred_models=preferred_models,
             exclude_openai_owned_models=exclude_openai_owned_models,
         )
+        # Add explicitly configured provider models even if they are not listed by cliproxy /models.
+        preferred_custom: list[str] = []
+        for mid in preferred_models:
+            p = _provider_runtime_cfg(mid, models_cfg)
+            if p.get("provider_id") and p.get("api_key"):
+                preferred_custom.append(mid)
+        for mid in preferred_custom:
+            if mid not in candidates:
+                candidates.append(mid)
+
         if not candidates:
             raise RuntimeError("no available models")
 
@@ -349,7 +371,19 @@ async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple
                         timeout_eff = max(3.0, min(120.0, float(cfg.get("timeout_s"))))
                 except Exception:
                     timeout_eff = timeout_s
-                res, meta = await _chat_completions(client, mid, prompt, timeout_s=timeout_eff)
+                provider_cfg = _provider_runtime_cfg(mid, models_cfg)
+                if provider_cfg.get("provider_id") and provider_cfg.get("api_key"):
+                    res, meta = await _chat_completions_provider(
+                        client,
+                        model=mid,
+                        prompt=prompt,
+                        timeout_s=timeout_eff,
+                        provider_id=provider_cfg["provider_id"],
+                        api_key=provider_cfg["api_key"],
+                        base_url=provider_cfg.get("base_url") or "",
+                    )
+                else:
+                    res, meta = await _chat_completions(client, mid, prompt, timeout_s=timeout_eff)
                 meta["model_id"] = mid
                 return res, mid, meta
             except Exception as e:
@@ -424,6 +458,90 @@ async def _chat_completions(
             last_err = e
             continue
 
+    raise RuntimeError(f"llm endpoint attempts failed: {last_err}") from last_err
+
+
+def _provider_base_and_headers(*, provider_id: str, api_key: str, base_url: str) -> tuple[str, dict[str, str]]:
+    pid = (provider_id or "").strip().casefold()
+    if pid == "openai":
+        base = (base_url or "https://api.openai.com/v1").rstrip("/")
+        return base, {"Authorization": f"Bearer {api_key}"}
+    if pid == "openrouter":
+        base = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
+        return base, {"Authorization": f"Bearer {api_key}"}
+    if pid == "cliapiproxy":
+        base = (base_url or settings.cliproxy_base_url).rstrip("/")
+        return base, {"Authorization": f"Bearer {api_key}"}
+    raise RuntimeError(f"provider {provider_id} is not supported for runtime classify")
+
+
+async def _chat_completions_provider(
+    client: httpx.AsyncClient,
+    *,
+    model: str,
+    prompt: str,
+    timeout_s: float,
+    provider_id: str,
+    api_key: str,
+    base_url: str,
+) -> tuple[LLMResult, dict]:
+    base, headers = _provider_base_and_headers(provider_id=provider_id, api_key=api_key, base_url=base_url)
+
+    chat_body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON generator. Output JSON only. All strings in JSON must be Russian."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+    }
+    chat_body_no_rf = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON generator. Output JSON only. All strings in JSON must be Russian."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+    }
+    attempts: list[tuple[str, dict]] = [
+        (f"{base}/chat/completions", chat_body),
+        (f"{base}/chat/completions", chat_body_no_rf),
+    ]
+    last_err: Exception | None = None
+    json_mode_failed = False
+    for url, body in attempts:
+        if json_mode_failed and "response_format" in body:
+            continue
+        try:
+            r = await client.post(url, headers=headers, json=body, timeout=timeout_s)
+            try:
+                data = r.json()
+            except Exception:
+                data = {}
+            if r.status_code >= 400:
+                msg, provider_status = _extract_provider_error(data, fallback=r.text[:240])
+                if _is_json_mode_unsupported(msg or provider_status):
+                    json_mode_failed = True
+                raise RuntimeError(
+                    f"http={r.status_code}; provider_status={provider_status or '-'}; error={msg or 'unknown'}"
+                )
+            content = _extract_content_text(data)
+            parsed = _try_parse_json(content or "")
+            if not parsed:
+                raise RuntimeError(f"failed to parse model output: {(content or '')[:200]}")
+            meta = {
+                "status_code": int(r.status_code),
+                "rate_limits": extract_rate_limit_headers(r.headers),
+                "usage": _extract_usage(data),
+                "error": "",
+                "provider_status": "",
+                "reset_in_sec": int((extract_rate_limit_headers(r.headers).get("retry-after") or 0) or 0),
+            }
+            return LLMResult.model_validate(parsed), meta
+        except Exception as e:
+            last_err = e
+            continue
     raise RuntimeError(f"llm endpoint attempts failed: {last_err}") from last_err
 
 
@@ -593,17 +711,29 @@ async def test_model_availability(
     *,
     model_id: str,
     timeout_s: float,
+    provider_id: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
 ) -> dict:
     """
     Lightweight availability probe for a model.
     Returns status, latency and any exposed rate-limit headers.
     """
-    if not settings.cliproxy_base_url:
-        raise RuntimeError("cliproxy_base_url is not set")
-    if not settings.cliproxy_api_key:
-        raise RuntimeError("cliproxy_api_key is not set")
+    pid = (provider_id or "").strip().casefold()
+    if pid and (api_key or "").strip():
+        base, headers = _provider_base_and_headers(
+            provider_id=pid,
+            api_key=(api_key or "").strip(),
+            base_url=(base_url or "").strip(),
+        )
+    else:
+        if not settings.cliproxy_base_url:
+            raise RuntimeError("cliproxy_base_url is not set")
+        if not settings.cliproxy_api_key:
+            raise RuntimeError("cliproxy_api_key is not set")
+        base = settings.cliproxy_base_url.rstrip("/")
+        headers = _auth_headers()
 
-    base = settings.cliproxy_base_url.rstrip("/")
     url = f"{base}/chat/completions"
     body = {
         "model": model_id,
@@ -622,7 +752,7 @@ async def test_model_availability(
     started = time.perf_counter()
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.post(url, headers=_auth_headers(), json=body, timeout=timeout_s)
+            r = await client.post(url, headers=headers, json=body, timeout=timeout_s)
             payload = None
             try:
                 payload = r.json()
@@ -632,7 +762,7 @@ async def test_model_availability(
                 msg, ps = _extract_provider_error(payload or {}, fallback=r.text[:240])
                 if _is_json_mode_unsupported(msg or ps):
                     # Retry once without response_format for models that don't support JSON mode.
-                    r = await client.post(url, headers=_auth_headers(), json=body_no_rf, timeout=timeout_s)
+                    r = await client.post(url, headers=headers, json=body_no_rf, timeout=timeout_s)
         latency_ms = int((time.perf_counter() - started) * 1000)
         rate_headers = extract_rate_limit_headers(r.headers)
         payload = None

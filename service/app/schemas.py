@@ -40,3 +40,13 @@ class InternalDiscoveryLogRequest(BaseModel):
     message: str
     chat_username: str = ""
     query: str = ""
+
+
+class InternalDiscoveryTargetRequest(BaseModel):
+    target_key: str = Field(min_length=2)
+    target: str = ""
+    username: str = ""
+    source: str = ""
+    query: str = ""
+    status: str = "discovered"
+    note: str = ""

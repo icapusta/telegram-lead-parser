@@ -140,6 +140,7 @@ PARSER_INGEST_URL = os.environ.get("PARSER_INGEST_URL", "http://parser-service:8
 PARSER_INTERNAL_SETTINGS_URL = os.environ.get("PARSER_INTERNAL_SETTINGS_URL", "http://parser-service:8080/api/internal/settings")
 PARSER_INTERNAL_CLASSIFY_URL = os.environ.get("PARSER_INTERNAL_CLASSIFY_URL", "http://parser-service:8080/api/internal/classify")
 PARSER_INTERNAL_DISCOVERY_LOG_URL = os.environ.get("PARSER_INTERNAL_DISCOVERY_LOG_URL", "http://parser-service:8080/api/internal/discovery/log")
+PARSER_INTERNAL_DISCOVERY_TARGET_URL = os.environ.get("PARSER_INTERNAL_DISCOVERY_TARGET_URL", "http://parser-service:8080/api/internal/discovery/target")
 PARSER_INTERNAL_TOKEN = os.environ.get("PARSER_INTERNAL_TOKEN", "")
 
 BUSINESS_FOLDER_QUERY = os.environ.get("BUSINESS_FOLDER_QUERY", "бизнес").casefold()
@@ -431,6 +432,43 @@ async def _log(level: str, event: str, message: str, chat_username: str = "", qu
     await _push_discovery_log(level=level, event=event, message=message, chat_username=chat_username, query=query)
 
 
+async def _save_discovery_target(
+    *,
+    target_key: str,
+    target: str,
+    username: str,
+    source: str,
+    query: str,
+    status: str,
+    note: str = "",
+) -> bool | None:
+    """
+    Upsert target in parser-service.
+    Returns:
+      True  -> new row created
+      False -> duplicate/update existing
+      None  -> request failed
+    """
+    headers = {"x-internal-token": PARSER_INTERNAL_TOKEN} if PARSER_INTERNAL_TOKEN else {}
+    body = {
+        "target_key": target_key,
+        "target": target,
+        "username": username,
+        "source": source,
+        "query": query,
+        "status": status,
+        "note": note,
+    }
+    try:
+        async with httpx.AsyncClient() as h:
+            r = await h.post(PARSER_INTERNAL_DISCOVERY_TARGET_URL, headers=headers, json=body, timeout=8.0)
+            r.raise_for_status()
+            data = r.json()
+            return bool(data.get("created"))
+    except Exception:
+        return None
+
+
 async def _fetch_runtime_config() -> tuple[FilterConfig, DiscoveryConfig]:
     headers = {"x-internal-token": PARSER_INTERNAL_TOKEN} if PARSER_INTERNAL_TOKEN else {}
     async with httpx.AsyncClient() as h:
@@ -520,7 +558,27 @@ async def _scan_recent_messages(entity, cfg: FilterConfig, dcfg: DiscoveryConfig
     return hard_candidates, llm_positive
 
 
-async def _post_join_flow(channel_entity, *, cfg: FilterConfig, dcfg: DiscoveryConfig, username_for_log: str, query: str) -> None:
+async def _post_join_flow(
+    channel_entity,
+    *,
+    cfg: FilterConfig,
+    dcfg: DiscoveryConfig,
+    username_for_log: str,
+    query: str,
+    source: str,
+    target: str,
+    target_key: str,
+) -> None:
+    await _save_discovery_target(
+        target_key=target_key,
+        target=target,
+        username=username_for_log.lstrip("@"),
+        source=source,
+        query=query,
+        status="joined",
+        note="joined",
+    )
+
     # Add to Business folder.
     try:
         peer = await client.get_input_entity(channel_entity)
@@ -548,12 +606,48 @@ async def _post_join_flow(channel_entity, *, cfg: FilterConfig, dcfg: DiscoveryC
                 except Exception:
                     pass
                 await _log("info", "leave", "no_llm_candidates", chat_username=username_for_log, query=query)
+                await _save_discovery_target(
+                    target_key=target_key,
+                    target=target,
+                    username=username_for_log.lstrip("@"),
+                    source=source,
+                    query=query,
+                    status="left",
+                    note="no_llm_candidates",
+                )
             except Exception as e:
                 await _log("error", "leave_failed", str(e), chat_username=username_for_log, query=query)
+                await _save_discovery_target(
+                    target_key=target_key,
+                    target=target,
+                    username=username_for_log.lstrip("@"),
+                    source=source,
+                    query=query,
+                    status="failed",
+                    note=f"leave_failed:{str(e)[:120]}",
+                )
         elif llm_cands > 0:
             await _log("info", "keep", "llm_candidate_found", chat_username=username_for_log, query=query)
+            await _save_discovery_target(
+                target_key=target_key,
+                target=target,
+                username=username_for_log.lstrip("@"),
+                source=source,
+                query=query,
+                status="kept",
+                note="llm_candidate_found",
+            )
     except Exception as e:
         await _log("error", "scan_failed", str(e), chat_username=username_for_log, query=query)
+        await _save_discovery_target(
+            target_key=target_key,
+            target=target,
+            username=username_for_log.lstrip("@"),
+            source=source,
+            query=query,
+            status="failed",
+            note=f"scan_failed:{str(e)[:120]}",
+        )
 
 
 async def discovery_loop() -> None:
@@ -604,6 +698,21 @@ async def discovery_loop() -> None:
                     if not username:
                         # We can only join public targets without username via invite links (handled separately).
                         continue
+                    target_key = _target_key("@" + username)
+                    created = await _save_discovery_target(
+                        target_key=target_key,
+                        target="@" + username,
+                        username=username,
+                        source="tg_search",
+                        query=q,
+                        status="discovered",
+                    )
+                    if created is True:
+                        await _log("info", "target_saved", "added to table", chat_username=f"@{username}", query=q)
+                    elif created is False:
+                        await _log("info", "target_duplicate", "already in table", chat_username=f"@{username}", query=q)
+                    else:
+                        await _log("warn", "target_save_failed", "internal api failed", chat_username=f"@{username}", query=q)
                     if state.seen(username):
                         continue
                     state.mark_seen(username)
@@ -620,46 +729,69 @@ async def discovery_loop() -> None:
                         await _log("error", "join_failed", str(e), chat_username=f"@{username}", query=q)
                         continue
 
-                    await _post_join_flow(ch, cfg=cfg, dcfg=dcfg, username_for_log=f"@{username}", query=q)
+                    await _post_join_flow(
+                        ch,
+                        cfg=cfg,
+                        dcfg=dcfg,
+                        username_for_log=f"@{username}",
+                        query=q,
+                        source="tg_search",
+                        target="@" + username,
+                        target_key=target_key,
+                    )
 
                     # Small pause between joins to be gentle.
                     await asyncio.sleep(8)
 
                 # Extra sources: search engines + TGStat.
-                external_targets: list[str] = []
+                external_targets: list[tuple[str, str]] = []
                 if EXTERNAL_SEARCH_ENABLED:
                     if SEARCH_ENGINE_ENABLED:
-                        external_targets.extend(await _search_engine_targets(q))
+                        external_targets.extend([("search_engine", t) for t in (await _search_engine_targets(q))])
                     if TGSTAT_SEARCH_ENABLED:
-                        external_targets.extend(await _tgstat_targets(q))
+                        external_targets.extend([("tgstat", t) for t in (await _tgstat_targets(q))])
 
                 # Dedupe by normalized key and cap attempts per query.
-                uniq_targets: list[str] = []
+                uniq_targets: list[tuple[str, str]] = []
                 seen_keys: set[str] = set()
-                for t in external_targets:
+                for src, t in external_targets:
                     k = _target_key(t)
                     if not k or k in seen_keys:
                         continue
                     seen_keys.add(k)
-                    uniq_targets.append(t)
+                    uniq_targets.append((src, t))
                     if len(uniq_targets) >= EXTERNAL_RESULTS_PER_QUERY:
                         break
 
                 if uniq_targets:
                     await _log("info", "external_search", f"targets={len(uniq_targets)}", query=q)
 
-                for target in uniq_targets:
+                for src, target in uniq_targets:
                     can, why = budget.can_join()
                     if not can:
                         await _log("warn", "budget_block", why, query=q)
                         break
 
                     tk = _target_key(target)
+                    username = _extract_username_from_target(target) or ""
+                    created = await _save_discovery_target(
+                        target_key=tk,
+                        target=target,
+                        username=username,
+                        source=src,
+                        query=q,
+                        status="discovered",
+                    )
+                    if created is True:
+                        await _log("info", "target_saved", "added to table", chat_username=("@" + username) if username else target, query=q)
+                    elif created is False:
+                        await _log("info", "target_duplicate", "already in table", chat_username=("@" + username) if username else target, query=q)
+                    else:
+                        await _log("warn", "target_save_failed", "internal api failed", chat_username=("@" + username) if username else target, query=q)
                     if state.seen_target(tk):
                         continue
                     state.mark_target(tk)
 
-                    username = _extract_username_from_target(target)
                     if username and state.seen(username):
                         continue
                     if username:
@@ -695,7 +827,16 @@ async def discovery_loop() -> None:
                         await _log("warn", "skip_non_channel", "joined target is not channel/group", chat_username=display_name, query=q)
                         continue
 
-                    await _post_join_flow(channel_entity, cfg=cfg, dcfg=dcfg, username_for_log=display_name, query=q)
+                    await _post_join_flow(
+                        channel_entity,
+                        cfg=cfg,
+                        dcfg=dcfg,
+                        username_for_log=display_name,
+                        query=q,
+                        source=src,
+                        target=target,
+                        target_key=tk,
+                    )
                     await asyncio.sleep(8)
 
             await asyncio.sleep(max(60.0, float(dcfg.interval_s)))

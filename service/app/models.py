@@ -86,3 +86,20 @@ class DiscoveryLog(SQLModel, table=True):
     message: str = ""
     chat_username: str = Field(default="", index=True)
     query: str = ""
+
+
+class DiscoveryTarget(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+    # Normalized dedupe key, e.g. "user:mychat" / "invite:abcdef".
+    target_key: str = Field(default="", index=True)
+    target: str = Field(default="", index=True)  # @username or t.me link
+    username: str = Field(default="", index=True)
+    source: str = Field(default="", index=True)  # tg_search | search_engine | tgstat
+    query: str = Field(default="", index=True)
+
+    # Last known status: discovered | joined | left | kept | failed
+    status: str = Field(default="discovered", index=True)
+    note: str = ""

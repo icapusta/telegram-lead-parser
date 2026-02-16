@@ -13,8 +13,14 @@ from sqlmodel import select
 
 from .config import settings
 from .db import init_db, session
-from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog
-from .schemas import TgMonitorPayload, InternalClassifyRequest, InternalClassifyResponse, InternalDiscoveryLogRequest
+from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog, DiscoveryTarget
+from .schemas import (
+    TgMonitorPayload,
+    InternalClassifyRequest,
+    InternalClassifyResponse,
+    InternalDiscoveryLogRequest,
+    InternalDiscoveryTargetRequest,
+)
 from .filtering import hard_filter, request_intent_filter
 from .llm import classify, suggest_stopwords
 from .notify import send_event_notification, utcnow
@@ -559,6 +565,20 @@ def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_aut
     )
 
 
+@app.get("/discovery/targets", response_class=HTMLResponse)
+def discovery_targets_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
+    rows = db.exec(
+        select(DiscoveryTarget).order_by(DiscoveryTarget.updated_at.desc()).limit(1000)
+    ).all()
+    return templates.TemplateResponse(
+        request,
+        "discovery_targets.html",
+        {
+            "rows": rows,
+        },
+    )
+
+
 @app.post("/settings")
 def update_settings(
     keywords_enabled: bool = Form(False),
@@ -627,6 +647,27 @@ def discovery_logs(limit: int = 200, db=Depends(_db), _auth=Depends(_require_aut
     ]
 
 
+@app.get("/api/discovery/targets")
+def discovery_targets(limit: int = 500, db=Depends(_db), _auth=Depends(_require_auth)) -> list[dict]:
+    lim = min(max(int(limit or 500), 1), 5000)
+    rows = db.exec(select(DiscoveryTarget).order_by(DiscoveryTarget.updated_at.desc()).limit(lim)).all()
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat(),
+            "updated_at": r.updated_at.isoformat(),
+            "target_key": r.target_key,
+            "target": r.target,
+            "username": r.username,
+            "source": r.source,
+            "query": r.query,
+            "status": r.status,
+            "note": r.note,
+        }
+        for r in rows
+    ]
+
+
 @app.post("/api/internal/discovery/log")
 def internal_discovery_log(req: InternalDiscoveryLogRequest, db=Depends(_db), _it=Depends(_require_internal_token)) -> dict:
     row = DiscoveryLog(
@@ -639,6 +680,49 @@ def internal_discovery_log(req: InternalDiscoveryLogRequest, db=Depends(_db), _i
     db.add(row)
     db.commit()
     return {"ok": True, "id": row.id}
+
+
+@app.post("/api/internal/discovery/target")
+def internal_discovery_target(req: InternalDiscoveryTargetRequest, db=Depends(_db), _it=Depends(_require_internal_token)) -> dict:
+    key = (req.target_key or "").strip().casefold()
+    if len(key) < 2:
+        raise HTTPException(status_code=400, detail="target_key is required")
+
+    now = utcnow()
+    row = db.exec(select(DiscoveryTarget).where(DiscoveryTarget.target_key == key)).first()
+    if row:
+        # Update metadata, but keep original created_at.
+        row.updated_at = now
+        if req.target:
+            row.target = (req.target or "")[:300]
+        if req.username:
+            row.username = (req.username or "")[:120]
+        if req.source:
+            row.source = (req.source or "")[:40]
+        if req.query:
+            row.query = (req.query or "")[:200]
+        if req.status:
+            row.status = (req.status or "")[:40]
+        if req.note:
+            row.note = (req.note or "")[:500]
+        db.add(row)
+        db.commit()
+        return {"ok": True, "created": False, "id": row.id}
+
+    row = DiscoveryTarget(
+        created_at=now,
+        updated_at=now,
+        target_key=key,
+        target=(req.target or "")[:300],
+        username=(req.username or "")[:120],
+        source=(req.source or "")[:40],
+        query=(req.query or "")[:200],
+        status=(req.status or "discovered")[:40],
+        note=(req.note or "")[:500],
+    )
+    db.add(row)
+    db.commit()
+    return {"ok": True, "created": True, "id": row.id}
 
 
 @app.post("/api/events/{event_id}/retry")

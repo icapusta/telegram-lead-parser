@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Discovery Targets</title>
+    <script>
+      (function () {
+        const key = "theme";
+        const saved = localStorage.getItem(key);
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+      })();
+      function toggleTheme() {
+        const key = "theme";
+        const cur = document.documentElement.dataset.theme || "light";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem(key, next);
+      }
+    </script>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #11151b;
+        --text: #e7eef7;
+        --muted: #9db0c4;
+        --border: rgba(255,255,255,0.08);
+        --accent: #58a6ff;
+        --good: #2ecc71;
+        --bad: #ff5c7a;
+        --warn: #f1c40f;
+      }
+      :root[data-theme="light"] {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --text: #0f172a;
+        --muted: #475569;
+        --border: rgba(2, 6, 23, 0.10);
+        --accent: #2563eb;
+      }
+      body { margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+      .wrap { max-width: 1250px; margin:24px auto; padding:0 16px; }
+      .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+      .brand { display:flex; align-items:baseline; gap:10px; }
+      .brand h1 { margin:0; font-size:18px; }
+      .brand a { color:var(--accent); text-decoration:none; font-size:12px; }
+      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; }
+      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
+      table { width:100%; border-collapse:collapse; }
+      th, td { padding:8px; border-bottom:1px solid var(--border); font-size:12px; text-align:left; vertical-align:top; }
+      th { color:var(--muted); }
+      .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+      .small { color:var(--muted); font-size:11px; }
+      .pill { display:inline-flex; border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; }
+      .pill.good { color:var(--good); border-color:rgba(46,204,113,0.35); }
+      .pill.bad { color:var(--bad); border-color:rgba(255,92,122,0.35); }
+      .pill.warn { color:var(--warn); border-color:rgba(241,196,15,0.35); }
+      a { color:var(--accent); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <h1>Found Targets</h1>
+          <a href="/discovery">Discovery</a>
+          <a href="/">Dashboard</a>
+          <a href="/settings">Settings</a>
+        </div>
+        <button class="btn" type="button" onclick="toggleTheme()">Toggle theme</button>
+      </div>
+
+      <div class="card">
+        <div class="small" style="margin-bottom:10px;">Найденные сообщества (с дедупликацией по target_key)</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Updated</th>
+              <th>Status</th>
+              <th>Source</th>
+              <th>Target</th>
+              <th>Username</th>
+              <th>Query</th>
+              <th>Note</th>
+              <th>Key</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td class="small">{{ r.updated_at }}</td>
+              <td>
+                {% if r.status == "kept" %}
+                  <span class="pill good">{{ r.status }}</span>
+                {% elif r.status == "left" or r.status == "failed" %}
+                  <span class="pill bad">{{ r.status }}</span>
+                {% else %}
+                  <span class="pill warn">{{ r.status }}</span>
+                {% endif %}
+              </td>
+              <td>{{ r.source }}</td>
+              <td>
+                {% if r.target.startswith("http") %}
+                  <a href="{{ r.target }}" target="_blank" rel="noreferrer">{{ r.target }}</a>
+                {% else %}
+                  {{ r.target }}
+                {% endif %}
+              </td>
+              <td>{{ r.username }}</td>
+              <td>{{ r.query }}</td>
+              <td>{{ r.note }}</td>
+              <td class="mono">{{ r.target_key }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

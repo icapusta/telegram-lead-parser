@@ -568,6 +568,30 @@ def settings_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth
 @app.get("/discovery", response_class=HTMLResponse)
 def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
     cfg = _get_settings(db)
+    now_msk = datetime.now(MSK_TZ)
+    day_start_msk = now_msk.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start_utc = day_start_msk.astimezone(timezone.utc)
+
+    added_today = len(
+        db.exec(select(DiscoveryTarget).where(DiscoveryTarget.created_at >= day_start_utc)).all()
+    )
+    joins_today = len(
+        db.exec(
+            select(DiscoveryLog).where(
+                DiscoveryLog.created_at >= day_start_utc,
+                DiscoveryLog.event == "join_ok",
+            )
+        ).all()
+    )
+    leaves_today = len(
+        db.exec(
+            select(DiscoveryLog).where(
+                DiscoveryLog.created_at >= day_start_utc,
+                DiscoveryLog.event == "leave",
+            )
+        ).all()
+    )
+
     rows = db.exec(
         select(DiscoveryLog).order_by(DiscoveryLog.created_at.desc()).limit(200)
     ).all()
@@ -577,6 +601,11 @@ def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_aut
         {
             "cfg": cfg,
             "rows": rows,
+            "stats": {
+                "added_today": added_today,
+                "joins_today": joins_today,
+                "leaves_today": leaves_today,
+            },
         },
     )
 

@@ -25,6 +25,25 @@ app = FastAPI(title="telegram-lead-parser", version="0.1.0")
 templates = Jinja2Templates(directory="templates")
 security = HTTPBasic()
 
+DEFAULT_DISCOVERY_QUERIES_TEXT = (
+    "ищу разработчика\n"
+    "нужен разработчик\n"
+    "ищу интегратора\n"
+    "требуется интеграция\n"
+    "1с интеграция\n"
+    "amocrm интеграция\n"
+    "битрикс24 интеграция\n"
+    "внедрение crm\n"
+    "доработка crm\n"
+    "сложная api интеграция\n"
+    "автоматизация бизнес процессов\n"
+    "n8n автоматизация\n"
+    "нужен подрядчик\n"
+    "ищем исполнителя\n"
+    "требуется внедрение\n"
+    "настроить webhook\n"
+)
+
 
 @app.on_event("startup")
 async def _startup() -> None:
@@ -76,8 +95,14 @@ def _require_internal_token(request: Request) -> None:
 def _get_settings(db) -> AppSettings:
     row = db.exec(select(AppSettings).where(AppSettings.id == 1)).first()
     if row:
+        # Backfill reasonable defaults for discovery queries on existing DBs.
+        if not (row.discovery_queries_text or "").strip():
+            row.discovery_queries_text = DEFAULT_DISCOVERY_QUERIES_TEXT
+            db.add(row)
+            db.commit()
+            db.refresh(row)
         return row
-    row = AppSettings(id=1)
+    row = AppSettings(id=1, discovery_queries_text=DEFAULT_DISCOVERY_QUERIES_TEXT)
     db.add(row)
     db.commit()
     db.refresh(row)

@@ -81,9 +81,15 @@ async def _process_event(event_id: int, db) -> None:
 
         if res.is_lead:
             excerpt = (ev.text or "").strip().replace("\n", " ")[:240]
-            await send_lead_notification(excerpt=excerpt, summary=ev.summary, link=ev.link)
-            ev.notified = True
-            ev.notified_at = utcnow()
+            try:
+                await send_lead_notification(excerpt=excerpt, summary=ev.summary, link=ev.link)
+                ev.notified = True
+                ev.notified_at = utcnow()
+            except Exception as e:
+                # Notifications are optional for now; we don't want the whole pipeline to fail
+                # when bot settings are missing or Telegram is temporarily unavailable.
+                ev.notified = False
+                ev.last_error = (ev.last_error + "\n" if ev.last_error else "") + f"notify: {e}"
 
         db.add(ev)
         db.commit()
@@ -121,4 +127,3 @@ async def retry_event(event_id: int, db=Depends(_db)) -> JSONResponse:
     db.commit()
     await _process_event(event_id, db)
     return JSONResponse({"ok": True})
-

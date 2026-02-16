@@ -156,6 +156,41 @@ def _try_parse_json(s: str) -> dict | None:
             return None
 
 
+def _extract_content_text(data: dict) -> str:
+    # ChatCompletions style
+    msg_content = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content")
+    )
+    if isinstance(msg_content, str):
+        return msg_content
+    if isinstance(msg_content, list):
+        parts: list[str] = []
+        for part in msg_content:
+            if isinstance(part, dict):
+                txt = part.get("text")
+                if isinstance(txt, str) and txt:
+                    parts.append(txt)
+        if parts:
+            return "\n".join(parts)
+
+    # Responses style
+    output_text = data.get("output_text", "")
+    if isinstance(output_text, str) and output_text:
+        return output_text
+    if isinstance(data.get("output"), list):
+        parts: list[str] = []
+        for out in data.get("output", []):
+            for part in out.get("content", []) or []:
+                txt = part.get("text")
+                if isinstance(txt, str) and txt:
+                    parts.append(txt)
+        if parts:
+            return "\n".join(parts)
+    return ""
+
+
 async def classify(text: str) -> tuple[LLMResult, str]:
     if not settings.cliproxy_base_url:
         raise RuntimeError("cliproxy_base_url is not set")
@@ -193,6 +228,7 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.2,
+        "response_format": {"type": "json_object"},
     }
 
     response_body = {
@@ -205,10 +241,6 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
         (f"{base}/chat/completions", chat_body),
         (f"{base}/responses", response_body),
     ]
-    # Compatibility fallback for providers exposing endpoints without /v1 prefix.
-    if base.endswith("/v1"):
-        attempts.append((f"{base[:-3]}/chat/completions", chat_body))
-        attempts.append((f"{base[:-3]}/responses", response_body))
 
     last_err: Exception | None = None
     for url, body in attempts:
@@ -216,19 +248,7 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
             r = await client.post(url, headers=headers, json=body, timeout=settings.llm_timeout_s)
             r.raise_for_status()
             data = r.json()
-            content = (
-                data.get("choices", [{}])[0].get("message", {}).get("content")
-                or data.get("output_text", "")
-            )
-            if not content and isinstance(data.get("output"), list):
-                for out in data.get("output", []):
-                    for part in out.get("content", []) or []:
-                        txt = part.get("text")
-                        if txt:
-                            content = txt
-                            break
-                    if content:
-                        break
+            content = _extract_content_text(data)
             parsed = _try_parse_json(content or "")
             if not parsed:
                 raise RuntimeError(f"failed to parse model output: {(content or '')[:200]}")
@@ -285,15 +305,13 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
                 }
                 response_body = {"model": mid, "input": prompt, "temperature": 0.2}
                 attempts: list[tuple[str, dict]] = [
                     (f"{base}/chat/completions", chat_body),
                     (f"{base}/responses", response_body),
                 ]
-                if base.endswith("/v1"):
-                    attempts.append((f"{base[:-3]}/chat/completions", chat_body))
-                    attempts.append((f"{base[:-3]}/responses", response_body))
 
                 data = None
                 for url, body in attempts:
@@ -307,19 +325,7 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                 if not data:
                     raise RuntimeError("stopwords endpoint attempts failed")
 
-                content = (
-                    data.get("choices", [{}])[0].get("message", {}).get("content")
-                    or data.get("output_text", "")
-                )
-                if not content and isinstance(data.get("output"), list):
-                    for out in data.get("output", []):
-                        for part in out.get("content", []) or []:
-                            txt = part.get("text")
-                            if txt:
-                                content = txt
-                                break
-                        if content:
-                            break
+                content = _extract_content_text(data)
                 parsed = _try_parse_json(content)
                 if not parsed or "stopwords" not in parsed:
                     raise RuntimeError(f"failed to parse stopwords: {content[:200]}")

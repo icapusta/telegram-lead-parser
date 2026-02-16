@@ -82,11 +82,15 @@
       .brand h1 { margin:0; font-size:18px; }
       .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; }
       .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
-      .grid { display:grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap:12px; }
+      .grid { display:grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap:12px; align-items:start; }
+      .grid > div { min-width: 0; }
       @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
       label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
       input[type="number"], textarea { width:100%; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:10px; padding:8px; font-size:12px; }
-      textarea { min-height:150px; resize:vertical; font-family:var(--mono); }
+      textarea { min-height:320px; resize:vertical; font-family:var(--mono); }
+      .params-grid { display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:10px 12px; }
+      .field { min-width: 0; }
+      .field label { margin-bottom:6px; }
       .toggles { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; }
       .toggle { display:flex; gap:8px; align-items:center; font-size:12px; }
       .save { margin-top:12px; display:flex; justify-content:flex-end; }
@@ -99,7 +103,9 @@
       .pill.good { color:var(--good); border-color:rgba(46,204,113,0.35); }
       .pill.bad { color:var(--bad); border-color:rgba(255,92,122,0.35); }
       .pill.warn { color:var(--warn); border-color:rgba(241,196,15,0.35); }
-      .head-actions { display:flex; gap:8px; }
+      .head-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+      @media (max-width: 1100px) { .params-grid { grid-template-columns: 1fr; } }
+      @media (max-width: 820px) { .head-actions { justify-content:flex-start; } .top { align-items:flex-start; flex-direction:column; } }
     </style>
   </head>
   <body>
@@ -129,26 +135,48 @@
               <textarea name="discovery_queries_text" spellcheck="false">{{ cfg.discovery_queries_text }}</textarea>
             </div>
             <div>
-              <label>РРЅС‚РµСЂРІР°Р» РґРёСЃРєР°РІРµСЂРё (СЃРµРє)</label>
-              <input type="number" min="60" name="discovery_interval_s" value="{{ cfg.discovery_interval_s }}" />
-              <label style="margin-top:10px;">Р“Р»СѓР±РёРЅР° СЃРєР°РЅРёСЂРѕРІР°РЅРёСЏ (РґРЅРё)</label>
-              <input type="number" min="1" name="scan_days" value="{{ cfg.scan_days }}" />
-              <label style="margin-top:10px;">РњР°РєСЃРёРјСѓРј СЃРѕРѕР±С‰РµРЅРёР№ РЅР° СЃРєР°РЅ</label>
-              <input type="number" min="30" name="scan_max_messages" value="{{ cfg.scan_max_messages }}" />
-              <label style="margin-top:10px;">Р Р°Р·РјРµСЂ LLM-РІС‹Р±РѕСЂРєРё</label>
-              <input type="number" min="1" name="scan_llm_sample" value="{{ cfg.scan_llm_sample }}" />
-              <label style="margin-top:10px;">Р’СЃС‚СѓРїР»РµРЅРёР№ РІ РґРµРЅСЊ</label>
-              <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
-              <label style="margin-top:10px;">Р’СЃС‚СѓРїР»РµРЅРёР№ РІ С‡Р°СЃ</label>
-              <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
-              <label style="margin-top:10px;">РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ РґРµРЅСЊ</label>
-              <input type="number" min="20" name="search_requests_per_day" value="{{ cfg.search_requests_per_day }}" />
-              <label style="margin-top:10px;">РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ С‡Р°СЃ</label>
-              <input type="number" min="5" name="search_requests_per_hour" value="{{ cfg.search_requests_per_hour }}" />
-              <label style="margin-top:10px;">Р—Р°РїСЂРѕСЃРѕРІ Р·Р° С‚РёРє</label>
-              <input type="number" min="1" name="queries_per_tick" value="{{ cfg.queries_per_tick }}" />
-              <label style="margin-top:10px;">Р РµР·СѓР»СЊС‚Р°С‚РѕРІ РЅР° Р·Р°РїСЂРѕСЃ</label>
-              <input type="number" min="5" max="50" name="search_results_per_query" value="{{ cfg.search_results_per_query }}" />
+              <div class="params-grid">
+                <div class="field">
+                  <label>РРЅС‚РµСЂРІР°Р» РґРёСЃРєР°РІРµСЂРё (СЃРµРє)</label>
+                  <input type="number" min="60" name="discovery_interval_s" value="{{ cfg.discovery_interval_s }}" />
+                </div>
+                <div class="field">
+                  <label>Р“Р»СѓР±РёРЅР° СЃРєР°РЅРёСЂРѕРІР°РЅРёСЏ (РґРЅРё)</label>
+                  <input type="number" min="1" name="scan_days" value="{{ cfg.scan_days }}" />
+                </div>
+                <div class="field">
+                  <label>РњР°РєСЃРёРјСѓРј СЃРѕРѕР±С‰РµРЅРёР№ РЅР° СЃРєР°РЅ</label>
+                  <input type="number" min="30" name="scan_max_messages" value="{{ cfg.scan_max_messages }}" />
+                </div>
+                <div class="field">
+                  <label>Р Р°Р·РјРµСЂ LLM-РІС‹Р±РѕСЂРєРё</label>
+                  <input type="number" min="1" name="scan_llm_sample" value="{{ cfg.scan_llm_sample }}" />
+                </div>
+                <div class="field">
+                  <label>Р’СЃС‚СѓРїР»РµРЅРёР№ РІ РґРµРЅСЊ</label>
+                  <input type="number" min="1" name="join_per_day" value="{{ cfg.join_per_day }}" />
+                </div>
+                <div class="field">
+                  <label>Р’СЃС‚СѓРїР»РµРЅРёР№ РІ С‡Р°СЃ</label>
+                  <input type="number" min="1" name="join_per_hour" value="{{ cfg.join_per_hour }}" />
+                </div>
+                <div class="field">
+                  <label>РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ РґРµРЅСЊ</label>
+                  <input type="number" min="20" name="search_requests_per_day" value="{{ cfg.search_requests_per_day }}" />
+                </div>
+                <div class="field">
+                  <label>РџРѕРёСЃРєРѕРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ РІ С‡Р°СЃ</label>
+                  <input type="number" min="5" name="search_requests_per_hour" value="{{ cfg.search_requests_per_hour }}" />
+                </div>
+                <div class="field">
+                  <label>Р—Р°РїСЂРѕСЃРѕРІ Р·Р° С‚РёРє</label>
+                  <input type="number" min="1" name="queries_per_tick" value="{{ cfg.queries_per_tick }}" />
+                </div>
+                <div class="field">
+                  <label>Р РµР·СѓР»СЊС‚Р°С‚РѕРІ РЅР° Р·Р°РїСЂРѕСЃ</label>
+                  <input type="number" min="5" max="50" name="search_results_per_query" value="{{ cfg.search_results_per_query }}" />
+                </div>
+              </div>
             </div>
           </div>
           <div class="save">

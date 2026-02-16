@@ -23,6 +23,7 @@ class LLMRoutingOptions:
     llm_max_attempts: int | None = None
     llm_timeout_s: float | None = None
     exclude_openai_owned_models: bool | None = None
+    models_config_json: str | None = None
 
 
 def _normalize_model_id(model_id: str) -> str:
@@ -66,6 +67,38 @@ def _parse_model_priority_text(raw: str | None) -> list[str]:
         return _default_model_priority()
     out = [x.strip() for x in raw.splitlines() if x.strip()]
     return out or _default_model_priority()
+
+
+def _parse_models_config_json(raw: str | None) -> dict[str, dict]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not k.strip():
+            continue
+        if not isinstance(v, dict):
+            continue
+        out[k.strip()] = v
+    return out
+
+
+def _model_cfg(model_id: str, models_cfg: dict[str, dict]) -> dict:
+    if not model_id:
+        return {}
+    # Exact first, casefold fallback.
+    if model_id in models_cfg:
+        return models_cfg[model_id]
+    mid = model_id.casefold()
+    for k, v in models_cfg.items():
+        if k.casefold() == mid:
+            return v
+    return {}
 
 
 def _is_model_allowed(mi: ModelInfo, *, exclude_openai_owned_models: bool) -> bool:
@@ -230,6 +263,7 @@ async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple
     preferred_models = _parse_model_priority_text(opts.model_priority_text)
     max_attempts = max(1, int(opts.llm_max_attempts if opts.llm_max_attempts is not None else settings.llm_max_attempts))
     timeout_s = float(opts.llm_timeout_s if opts.llm_timeout_s is not None else settings.llm_timeout_s)
+    models_cfg = _parse_models_config_json(opts.models_config_json)
     exclude_openai_owned_models = (
         bool(opts.exclude_openai_owned_models)
         if opts.exclude_openai_owned_models is not None
@@ -251,7 +285,16 @@ async def classify(text: str, options: LLMRoutingOptions | None = None) -> tuple
 
         for mid in candidates[:max_attempts]:
             try:
-                res = await _chat_completions(client, mid, prompt, timeout_s=timeout_s)
+                cfg = _model_cfg(mid, models_cfg)
+                if cfg.get("enabled") is False:
+                    continue
+                timeout_eff = timeout_s
+                try:
+                    if "timeout_s" in cfg:
+                        timeout_eff = max(3.0, min(120.0, float(cfg.get("timeout_s"))))
+                except Exception:
+                    timeout_eff = timeout_s
+                res = await _chat_completions(client, mid, prompt, timeout_s=timeout_eff)
                 return res, mid
             except Exception as e:
                 last_err = e
@@ -314,6 +357,7 @@ async def suggest_stopwords(
     preferred_models = _parse_model_priority_text(opts.model_priority_text)
     max_attempts = max(1, int(opts.llm_max_attempts if opts.llm_max_attempts is not None else settings.llm_max_attempts))
     timeout_s = float(opts.llm_timeout_s if opts.llm_timeout_s is not None else settings.llm_timeout_s)
+    models_cfg = _parse_models_config_json(opts.models_config_json)
     exclude_openai_owned_models = (
         bool(opts.exclude_openai_owned_models)
         if opts.exclude_openai_owned_models is not None
@@ -348,6 +392,15 @@ async def suggest_stopwords(
         last_err: Exception | None = None
         for mid in candidates[:max_attempts]:
             try:
+                cfg = _model_cfg(mid, models_cfg)
+                if cfg.get("enabled") is False:
+                    continue
+                timeout_eff = timeout_s
+                try:
+                    if "timeout_s" in cfg:
+                        timeout_eff = max(3.0, min(120.0, float(cfg.get("timeout_s"))))
+                except Exception:
+                    timeout_eff = timeout_s
                 base = settings.cliproxy_base_url.rstrip("/")
                 chat_body = {
                     "model": mid,
@@ -368,7 +421,7 @@ async def suggest_stopwords(
                 data = None
                 for url, body in attempts:
                     try:
-                        r = await client.post(url, headers=_auth_headers(), json=body, timeout=timeout_s)
+                        r = await client.post(url, headers=_auth_headers(), json=body, timeout=timeout_eff)
                         r.raise_for_status()
                         data = r.json()
                         break

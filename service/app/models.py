@@ -82,6 +82,9 @@ class AppSettings(SQLModel, table=True):
     llm_max_attempts: int = Field(default=3)
     llm_timeout_s: float = Field(default=15.0)
     exclude_openai_owned_models: bool = Field(default=True)
+    # JSON dict with per-model config:
+    # { "model_id": { "enabled": true, "timeout_s": 15, "link": "...", "notes": "..." } }
+    llm_models_config_json: str = Field(default="{}")
 
     # Discovery settings (tg-agent).
     discovery_enabled: bool = Field(default=True)

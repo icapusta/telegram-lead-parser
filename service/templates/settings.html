@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
@@ -12,6 +12,21 @@
         const theme = saved || (prefersDark ? "dark" : "light");
         document.documentElement.dataset.theme = theme;
       })();
+
+      const POPULAR_MODELS = [
+        { id: "gpt-5", provider: "OpenAI", link: "https://platform.openai.com/docs/models" },
+        { id: "gpt-5-mini", provider: "OpenAI", link: "https://platform.openai.com/docs/models" },
+        { id: "gpt-4.1", provider: "OpenAI", link: "https://platform.openai.com/docs/models" },
+        { id: "gemini-2.5-pro", provider: "Google Gemini", link: "https://ai.google.dev/gemini-api/docs/models" },
+        { id: "gemini-2.5-flash", provider: "Google Gemini", link: "https://ai.google.dev/gemini-api/docs/models" },
+        { id: "claude-sonnet-4-5", provider: "Anthropic", link: "https://docs.anthropic.com/claude/docs/models-overview" },
+        { id: "claude-opus-4-6", provider: "Anthropic", link: "https://docs.anthropic.com/claude/docs/models-overview" },
+        { id: "or-llama-3.3-70b-free", provider: "OpenRouter", link: "https://openrouter.ai/models" },
+        { id: "or-deepseek-r1-0528-free", provider: "OpenRouter", link: "https://openrouter.ai/models" },
+        { id: "or-qwen3-coder-free", provider: "OpenRouter", link: "https://openrouter.ai/models" },
+        { id: "z.ai-glm-4.7-flash", provider: "Z.ai", link: "https://www.z.ai/" }
+      ];
+
       function toggleTheme() {
         const key = "theme";
         const cur = document.documentElement.dataset.theme || "light";
@@ -19,16 +34,150 @@
         document.documentElement.dataset.theme = next;
         localStorage.setItem(key, next);
       }
+
       function esc(s) {
         return String(s ?? "")
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;");
       }
+
+      function getPriorityLines() {
+        const ta = document.querySelector("textarea[name='llm_model_priority_text']");
+        return (ta.value || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      }
+
+      function setPriorityLines(lines) {
+        const ta = document.querySelector("textarea[name='llm_model_priority_text']");
+        ta.value = [...new Set(lines)].join("\n") + (lines.length ? "\n" : "");
+      }
+
+      function parseModelCfg() {
+        const ta = document.getElementById("llm_models_config_json");
+        try {
+          const obj = JSON.parse(ta.value || "{}");
+          return obj && typeof obj === "object" ? obj : {};
+        } catch {
+          return {};
+        }
+      }
+
+      function saveModelCfg(obj) {
+        const ta = document.getElementById("llm_models_config_json");
+        ta.value = JSON.stringify(obj, null, 2);
+      }
+
+      function guessModelLink(modelId) {
+        const m = (modelId || "").toLowerCase();
+        if (m.includes("gpt") || m.includes("o1") || m.includes("o3")) return "https://platform.openai.com/docs/models";
+        if (m.includes("gemini")) return "https://ai.google.dev/gemini-api/docs/models";
+        if (m.includes("claude")) return "https://docs.anthropic.com/claude/docs/models-overview";
+        if (m.startsWith("or-") || m.includes("openrouter")) return "https://openrouter.ai/models";
+        if (m.includes("qwen")) return "https://qwenlm.github.io/";
+        if (m.includes("glm") || m.includes("z.ai")) return "https://www.z.ai/";
+        return "";
+      }
+
+      function ensureModelInConfig(modelId) {
+        const cfg = parseModelCfg();
+        if (!cfg[modelId]) {
+          cfg[modelId] = {
+            enabled: true,
+            timeout_s: Number(document.querySelector("input[name='llm_timeout_s']").value || 15),
+            link: guessModelLink(modelId),
+            notes: ""
+          };
+          saveModelCfg(cfg);
+        }
+      }
+
+      function addModel(modelId) {
+        if (!modelId) return;
+        const lines = getPriorityLines();
+        if (!lines.some((x) => x.toLowerCase() === modelId.toLowerCase())) {
+          lines.push(modelId);
+          setPriorityLines(lines);
+        }
+        ensureModelInConfig(modelId);
+        renderConfiguredModels();
+      }
+
+      function addPopularModel() {
+        const sel = document.getElementById("popular-model-select");
+        addModel(sel.value || "");
+      }
+
+      function addManualModel() {
+        const inp = document.getElementById("manual-model-id");
+        const modelId = (inp.value || "").trim();
+        if (!modelId) return;
+        addModel(modelId);
+        inp.value = "";
+      }
+
+      function removeModel(modelId) {
+        const lines = getPriorityLines().filter((x) => x.toLowerCase() !== modelId.toLowerCase());
+        setPriorityLines(lines);
+        const cfg = parseModelCfg();
+        delete cfg[modelId];
+        saveModelCfg(cfg);
+        renderConfiguredModels();
+      }
+
+      function updateCfgField(modelId, field, value) {
+        const cfg = parseModelCfg();
+        if (!cfg[modelId]) cfg[modelId] = { enabled: true, timeout_s: 15, link: "", notes: "" };
+        cfg[modelId][field] = value;
+        saveModelCfg(cfg);
+      }
+
+      function renderConfiguredModels() {
+        const wrap = document.getElementById("model-config-wrap");
+        const lines = getPriorityLines();
+        const cfg = parseModelCfg();
+        if (!lines.length) {
+          wrap.innerHTML = "<div class='hint'>Пока нет моделей в приоритете.</div>";
+          return;
+        }
+        const rows = lines.map((mid) => {
+          const c = cfg[mid] || { enabled: true, timeout_s: 15, link: guessModelLink(mid), notes: "" };
+          return `
+            <tr>
+              <td class="mono">${esc(mid)}</td>
+              <td><input type="checkbox" ${c.enabled === false ? "" : "checked"} onchange="updateCfgField('${esc(mid)}','enabled',this.checked)"></td>
+              <td><input type="number" min="3" max="120" step="1" value="${Number(c.timeout_s || 15)}" onchange="updateCfgField('${esc(mid)}','timeout_s',Number(this.value||15))"></td>
+              <td><input type="text" value="${esc(c.link || guessModelLink(mid))}" onchange="updateCfgField('${esc(mid)}','link',this.value)"></td>
+              <td><input type="text" value="${esc(c.notes || "")}" onchange="updateCfgField('${esc(mid)}','notes',this.value)"></td>
+              <td><button class="btn" type="button" onclick="removeModel('${esc(mid)}')">Удалить</button></td>
+            </tr>
+          `;
+        }).join("");
+
+        wrap.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Модель</th>
+                  <th>Вкл</th>
+                  <th>Таймаут (сек)</th>
+                  <th>Ссылка</th>
+                  <th>Заметка</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
       function selectedModels() {
         const boxes = Array.from(document.querySelectorAll("input[name='llm_model_pick']:checked"));
         return boxes.map((x) => x.value);
       }
+
       async function loadLLMModels() {
         const wrap = document.getElementById("llm-models-wrap");
         wrap.innerHTML = "<div class='hint'>Загрузка моделей...</div>";
@@ -53,7 +202,10 @@
             <td class="mono test-latency">-</td>
             <td class="mono test-limits">-</td>
             <td class="mono test-error">-</td>
-            <td><button class="btn" type="button" onclick="testOneModel('${esc(m.id)}')">Тест</button></td>
+            <td>
+              <button class="btn" type="button" onclick="addModel('${esc(m.id)}')">Добавить</button>
+              <button class="btn" type="button" onclick="testOneModel('${esc(m.id)}')">Тест</button>
+            </td>
           </tr>
         `).join("");
         wrap.innerHTML = `
@@ -70,7 +222,7 @@
                   <th>Задержка</th>
                   <th>Лимиты</th>
                   <th>Ошибка</th>
-                  <th>Действие</th>
+                  <th>Действия</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -78,6 +230,7 @@
           </div>
         `;
       }
+
       function applyTestResult(res) {
         const tr = document.querySelector(`tr[data-model-id="${CSS.escape(res.model_id || "")}"]`);
         if (!tr) return;
@@ -93,6 +246,7 @@
         tr.querySelector(".test-limits").textContent = limText || "-";
         tr.querySelector(".test-error").textContent = res.error || "-";
       }
+
       async function testOneModel(modelId) {
         const r = await fetch("/api/llm/test-model", {
           method: "POST",
@@ -103,6 +257,7 @@
         const res = await r.json();
         applyTestResult(res);
       }
+
       async function testSelectedModels() {
         const models = selectedModels();
         if (!models.length) return;
@@ -115,6 +270,7 @@
         const data = await r.json();
         for (const res of (data.results || [])) applyTestResult(res);
       }
+
       async function testAllLoadedModels() {
         const models = Array.from(document.querySelectorAll("input[name='llm_model_pick']")).map((x) => x.value);
         if (!models.length) return;
@@ -127,6 +283,22 @@
         const data = await r.json();
         for (const res of (data.results || [])) applyTestResult(res);
       }
+
+      function initPopularSelect() {
+        const sel = document.getElementById("popular-model-select");
+        sel.innerHTML = POPULAR_MODELS.map((m) => `<option value="${esc(m.id)}">${esc(m.id)} (${esc(m.provider)})</option>`).join("");
+      }
+
+      function beforeSubmit() {
+        // Ensure hidden JSON is always valid.
+        const cfg = parseModelCfg();
+        saveModelCfg(cfg);
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        initPopularSelect();
+        renderConfiguredModels();
+      });
     </script>
     <style>
       :root {
@@ -157,8 +329,8 @@
       .head-actions { display:flex; gap:8px; align-items:center; flex-wrap: wrap; justify-content: flex-end; }
       .card { margin-top: 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 14px; padding: 14px; }
       label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-      textarea { width: 100%; min-height: 160px; resize: vertical; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-family: var(--mono); font-size: 12px; outline: none; }
-      input[type="number"] { width:100%; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-size:12px; outline:none; }
+      textarea, input[type="number"], input[type="text"], select { width: 100%; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 12px; padding: 10px; font-size: 12px; outline: none; }
+      textarea { min-height: 160px; resize: vertical; font-family: var(--mono); }
       .row { display:grid; grid-template-columns: repeat(2, minmax(320px, 1fr)); gap: 12px; }
       .row > div { min-width: 0; }
       .row.row-full { grid-template-columns: 1fr; }
@@ -169,11 +341,12 @@
       .save { margin-top: 12px; display:flex; gap: 10px; align-items:center; justify-content:flex-end; }
       input[type="checkbox"] { width: 16px; height: 16px; }
       .table-wrap { width:100%; overflow:auto; border: 1px solid var(--border); border-radius: 10px; margin-top: 10px; }
-      table { width:100%; min-width:1100px; border-collapse: collapse; }
+      table { width:100%; min-width:1200px; border-collapse: collapse; }
       th, td { padding: 8px; border-bottom: 1px solid var(--border); font-size:12px; text-align:left; vertical-align:top; }
       th { color: var(--muted); }
       .ok { color: #2ecc71; }
       .bad { color: #ff5c7a; }
+      .inline-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
       @media (max-width: 900px) {
         .top { align-items:flex-start; flex-direction: column; }
         .head-actions { justify-content: flex-start; }
@@ -196,7 +369,7 @@
       </div>
 
       <div class="card">
-        <form method="post" action="/settings">
+        <form method="post" action="/settings" onsubmit="beforeSubmit()">
           <div class="toggles">
             <label class="toggle"><input type="checkbox" name="keywords_enabled" value="true" {% if cfg.keywords_enabled %}checked{% endif %}/> Фильтр ключевых слов</label>
             <label class="toggle"><input type="checkbox" name="stopwords_enabled" value="true" {% if cfg.stopwords_enabled %}checked{% endif %}/> Фильтр стоп-слов</label>
@@ -205,19 +378,20 @@
 
           <div class="row">
             <div>
-              <label>Ключевые слова (по одному на строку). Если фильтр включен и список не пустой, сообщение должно содержать хотя бы одно слово.</label>
+              <label>Ключевые слова (по одному на строку)</label>
               <textarea name="keywords_text" spellcheck="false">{{ cfg.keywords_text }}</textarea>
             </div>
             <div>
-              <label>Стоп-слова (по одному на строку). Если фильтр включен и список не пустой, любое совпадение блокирует сообщение.</label>
+              <label>Стоп-слова (по одному на строку)</label>
               <textarea name="stopwords_text" spellcheck="false">{{ cfg.stopwords_text }}</textarea>
             </div>
           </div>
 
           <div class="row" style="margin-top:12px;">
             <div>
-              <label>Приоритет моделей LLM (по одному id модели на строку).</label>
+              <label>Приоритет моделей LLM (по одному id модели на строку)</label>
               <textarea name="llm_model_priority_text" spellcheck="false">{{ cfg.llm_model_priority_text }}</textarea>
+              <div class="hint">Используются сверху вниз. Ниже можно добавить модели из популярного списка.</div>
             </div>
             <div>
               <label>Макс. попыток LLM (моделей на сообщение)</label>
@@ -227,14 +401,36 @@
               <div class="toggles" style="margin-top:12px;">
                 <label class="toggle"><input type="checkbox" name="exclude_openai_owned_models" value="true" {% if cfg.exclude_openai_owned_models %}checked{% endif %}/> Исключать модели с owned_by=openai</label>
               </div>
-              <div class="hint">Маршрутизация применяется к классификации лидов и авто-обновлению стоп-слов.</div>
             </div>
           </div>
 
           <div class="row row-full" style="margin-top:12px;">
-            <div style="flex: 1 1 100%;">
+            <div>
+              <label>Добавить популярную модель</label>
+              <div class="inline-controls">
+                <select id="popular-model-select"></select>
+                <button class="btn" type="button" onclick="addPopularModel()">Добавить</button>
+              </div>
+              <div class="hint">Примеры: OpenAI, Gemini, Anthropic, OpenRouter, Z.ai.</div>
+              <div class="inline-controls" style="margin-top:8px;">
+                <input id="manual-model-id" type="text" placeholder="Или введи свой id модели (например, gpt-5-mini)" />
+                <button class="btn" type="button" onclick="addManualModel()">Добавить вручную</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-full" style="margin-top:12px;">
+            <div>
+              <label>Настройки по каждой модели</label>
+              <div id="model-config-wrap"></div>
+              <textarea id="llm_models_config_json" name="llm_models_config_json" spellcheck="false" style="display:none;">{{ cfg.llm_models_config_json }}</textarea>
+            </div>
+          </div>
+
+          <div class="row row-full" style="margin-top:12px;">
+            <div>
               <label>Модели Cliapiproxy и проверка доступности</label>
-              <div class="head-actions">
+              <div class="head-actions" style="justify-content:flex-start;">
                 <button class="btn" type="button" onclick="loadLLMModels()">Загрузить модели</button>
                 <button class="btn" type="button" onclick="testSelectedModels()">Тест выбранных</button>
                 <button class="btn" type="button" onclick="testAllLoadedModels()">Тест всех загруженных</button>

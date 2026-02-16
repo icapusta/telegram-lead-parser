@@ -337,6 +337,9 @@ def _get_settings(db) -> AppSettings:
         if not (row.llm_model_priority_text or "").strip():
             row.llm_model_priority_text = default_model_priority_text()
             need_update = True
+        if not (row.llm_models_config_json or "").strip():
+            row.llm_models_config_json = "{}"
+            need_update = True
         if row.llm_max_attempts <= 0:
             row.llm_max_attempts = 3
             need_update = True
@@ -352,6 +355,7 @@ def _get_settings(db) -> AppSettings:
         id=1,
         discovery_queries_text=DEFAULT_DISCOVERY_QUERIES_TEXT,
         llm_model_priority_text=default_model_priority_text(),
+        llm_models_config_json="{}",
     )
     db.add(row)
     db.commit()
@@ -365,6 +369,7 @@ def _llm_opts(cfg: AppSettings) -> LLMRoutingOptions:
         llm_max_attempts=max(1, int(cfg.llm_max_attempts or 3)),
         llm_timeout_s=max(1.0, float(cfg.llm_timeout_s or 15.0)),
         exclude_openai_owned_models=bool(cfg.exclude_openai_owned_models),
+        models_config_json=cfg.llm_models_config_json or "{}",
     )
 
 
@@ -418,6 +423,7 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "llm_max_attempts": cfg.llm_max_attempts,
         "llm_timeout_s": cfg.llm_timeout_s,
         "exclude_openai_owned_models": cfg.exclude_openai_owned_models,
+        "llm_models_config_json": cfg.llm_models_config_json,
         "discovery_enabled": cfg.discovery_enabled,
         "discovery_queries_text": cfg.discovery_queries_text,
         "discovery_interval_s": cfg.discovery_interval_s,
@@ -858,6 +864,7 @@ def update_settings(
     llm_max_attempts: int = Form(3),
     llm_timeout_s: float = Form(15.0),
     exclude_openai_owned_models: bool = Form(False),
+    llm_models_config_json: str = Form("{}"),
     db=Depends(_db),
     _auth=Depends(_require_auth),
 ):
@@ -871,6 +878,14 @@ def update_settings(
     cfg.llm_max_attempts = max(1, min(12, int(llm_max_attempts or 3)))
     cfg.llm_timeout_s = max(3.0, min(90.0, float(llm_timeout_s or 15.0)))
     cfg.exclude_openai_owned_models = bool(exclude_openai_owned_models)
+    # Normalize to valid compact JSON; fallback to empty object on invalid payload.
+    try:
+        parsed_cfg = json.loads((llm_models_config_json or "{}").strip() or "{}")
+        if not isinstance(parsed_cfg, dict):
+            parsed_cfg = {}
+    except Exception:
+        parsed_cfg = {}
+    cfg.llm_models_config_json = json.dumps(parsed_cfg, ensure_ascii=False)
     db.add(cfg)
     db.commit()
     return RedirectResponse(url="/settings", status_code=303)

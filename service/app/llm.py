@@ -231,15 +231,8 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
         "response_format": {"type": "json_object"},
     }
 
-    response_body = {
-        "model": model,
-        "input": prompt,
-        "temperature": 0.2,
-    }
-
     attempts: list[tuple[str, dict]] = [
         (f"{base}/chat/completions", chat_body),
-        (f"{base}/responses", response_body),
     ]
 
     last_err: Exception | None = None
@@ -307,10 +300,8 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                     "temperature": 0.2,
                     "response_format": {"type": "json_object"},
                 }
-                response_body = {"model": mid, "input": prompt, "temperature": 0.2}
                 attempts: list[tuple[str, dict]] = [
                     (f"{base}/chat/completions", chat_body),
-                    (f"{base}/responses", response_body),
                 ]
 
                 data = None

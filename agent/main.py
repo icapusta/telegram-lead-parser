@@ -253,6 +253,7 @@ async def _add_to_business(peer) -> bool:
         return True
     include.append(peer)
     new_filter = types.DialogFilter(
+        id=getattr(flt, "id", fid),
         title=flt.title,
         pinned_peers=getattr(flt, "pinned_peers", None),
         include_peers=include,
@@ -284,6 +285,7 @@ async def _remove_from_business(peer) -> bool:
         return True
 
     new_filter = types.DialogFilter(
+        id=getattr(flt, "id", fid),
         title=flt.title,
         pinned_peers=getattr(flt, "pinned_peers", None),
         include_peers=kept,

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Telegram bot notifications
     tg_bot_token: str = Field(default="", validation_alias="TG_BOT_TOKEN")
     tg_chat_id: str = Field(default="", validation_alias="TG_CHAT_ID")
+    tg_webhook_secret: str = Field(default="", validation_alias="TG_WEBHOOK_SECRET")
+    tg_webhook_url: str = Field(default="", validation_alias="TG_WEBHOOK_URL")
 
     # LLM routing / retries
     llm_max_attempts: int = 3

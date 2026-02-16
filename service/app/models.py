@@ -45,6 +45,11 @@ class TgMonitorEvent(SQLModel, table=True):
     notified: bool = Field(default=False, index=True)
     notified_at: Optional[datetime] = None
 
+    # Human feedback from Telegram buttons
+    feedback: str = Field(default="", index=True)  # "lead" | "not_lead"
+    feedback_at: Optional[datetime] = None
+    stopwords_added: str = ""  # newline-separated additions made after feedback
+
 
 class AppSettings(SQLModel, table=True):
     """

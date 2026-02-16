@@ -16,8 +16,9 @@ from .db import init_db, session
 from .models import TgMonitorEvent, EventStatus, AppSettings
 from .schemas import TgMonitorPayload
 from .filtering import hard_filter
-from .llm import classify
+from .llm import classify, suggest_stopwords
 from .notify import send_lead_notification, utcnow
+from .tg_bot_api import set_webhook, answer_callback_query, edit_message_reply_markup, send_message_html
 
 
 app = FastAPI(title="telegram-lead-parser", version="0.1.0")
@@ -26,8 +27,18 @@ security = HTTPBasic()
 
 
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     init_db()
+    await _ensure_tg_webhook()
+
+
+async def _ensure_tg_webhook() -> None:
+    if not settings.tg_bot_token:
+        return
+    if not settings.tg_webhook_secret:
+        return
+    url = settings.tg_webhook_url.strip() or (settings.public_base_url.rstrip("/") + "/api/tg/webhook")
+    await set_webhook(url=url, secret_token=settings.tg_webhook_secret)
 
 
 def _db():
@@ -176,7 +187,7 @@ async def process_event(event_id: int) -> None:
             if res.is_lead:
                 excerpt = (ev.text or "").strip().replace("\n", " ")[:240]
                 try:
-                    await send_lead_notification(excerpt=excerpt, summary=ev.summary, link=ev.link)
+                    await send_lead_notification(event_id=ev.id or event_id, excerpt=excerpt, summary=ev.summary, link=ev.link)
                     ev.notified = True
                     ev.notified_at = utcnow()
                 except Exception as e:
@@ -261,8 +272,111 @@ async def retry_event(event_id: int, db=Depends(_db), _auth=Depends(_require_aut
 async def test_notify(_auth=Depends(_require_auth)) -> JSONResponse:
     # Minimal smoke test to validate bot credentials and outbound connectivity.
     await send_lead_notification(
+        event_id=0,
         excerpt="TEST lead notification",
         summary="Если ты видишь это сообщение, значит уведомления настроены правильно.",
         link=settings.public_base_url.rstrip("/") + "/",
     )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/tg/webhook")
+async def tg_webhook(request: Request) -> JSONResponse:
+    # Validate Telegram secret token header.
+    if not settings.tg_webhook_secret:
+        raise HTTPException(status_code=500, detail="TG_WEBHOOK_SECRET not configured")
+    secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not secrets.compare_digest(secret, settings.tg_webhook_secret):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    update = await request.json()
+    cq = update.get("callback_query")
+    if not cq:
+        return JSONResponse({"ok": True})
+
+    cq_id = cq.get("id", "")
+    data = cq.get("data", "") or ""
+    msg = cq.get("message") or {}
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id")
+    message_id = msg.get("message_id")
+
+    # Expect: fb:lead:{id} or fb:not_lead:{id}
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != "fb":
+        if cq_id:
+            await answer_callback_query(callback_query_id=cq_id, text="Неизвестная кнопка")
+        return JSONResponse({"ok": True})
+
+    action = parts[1]
+    try:
+        event_id = int(parts[2])
+    except Exception:
+        if cq_id:
+            await answer_callback_query(callback_query_id=cq_id, text="Некорректный id")
+        return JSONResponse({"ok": True})
+
+    # Update DB feedback
+    additions: list[str] = []
+    with session() as db:
+        ev = db.exec(select(TgMonitorEvent).where(TgMonitorEvent.id == event_id)).first()
+        if not ev:
+            if cq_id:
+                await answer_callback_query(callback_query_id=cq_id, text="Не найдено")
+            return JSONResponse({"ok": True})
+
+        ev.feedback = "lead" if action == "lead" else "not_lead"
+        ev.feedback_at = utcnow()
+        db.add(ev)
+        db.commit()
+
+        if action != "lead":
+            cfg = _get_settings(db)
+            try:
+                additions, _model = await suggest_stopwords(text=ev.text, existing_stopwords_text=cfg.stopwords_text)
+            except Exception as e:
+                ev.last_error = (ev.last_error + "\n" if ev.last_error else "") + f"stopwords: {e}"
+                db.add(ev)
+                db.commit()
+                additions = []
+
+            if additions:
+                # Append new stopwords
+                existing = [x.strip() for x in (cfg.stopwords_text or "").splitlines() if x.strip()]
+                existing_set = set(x.casefold() for x in existing)
+                new = [w for w in additions if w.casefold() not in existing_set]
+                if new:
+                    cfg.stopwords_text = (cfg.stopwords_text.rstrip() + "\n" if cfg.stopwords_text.strip() else "") + "\n".join(new) + "\n"
+                    db.add(cfg)
+                    db.commit()
+                    ev.stopwords_added = "\n".join(new)
+                    db.add(ev)
+                    db.commit()
+
+    # UX: acknowledge and remove buttons
+    if cq_id:
+        if action == "lead":
+            await answer_callback_query(callback_query_id=cq_id, text="Отмечено: Лид")
+        else:
+            msg_txt = "Отмечено: Не лид"
+            if additions:
+                msg_txt += f" (стоп-слова: {', '.join(additions[:4])})"
+            await answer_callback_query(callback_query_id=cq_id, text=msg_txt)
+
+    if chat_id is not None and message_id is not None:
+        try:
+            await edit_message_reply_markup(chat_id=int(chat_id), message_id=int(message_id))
+        except Exception:
+            pass
+
+    # Optional: notify about added stopwords
+    if action != "lead" and additions and settings.tg_chat_id:
+        try:
+            await send_message_html(
+                chat_id=settings.tg_chat_id,
+                html="<b>Стоп-слова обновлены:</b> " + ", ".join([w.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;') for w in additions]),
+            )
+        except Exception:
+            pass
+
     return JSONResponse({"ok": True})

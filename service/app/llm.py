@@ -99,15 +99,16 @@ def _auth_headers() -> dict[str, str]:
 def _build_prompt(text: str) -> str:
     text = text.strip()
     return (
-        "?? ?????????? ???????? ????????? ?? Telegram ? ???????????, ???? ?? ??????? ??????????? ?? ??????????/??????????.\\n"
-        "????? ?????? JSON ??? ??????? ?????? ? ???????:\\n"
-        '{\"is_lead\": true|false, \"summary\": \"1-2 ??????????? ?? ???????\", \"confidence\": 0.0-1.0}\\n\\n'
-        "??????????:\\n"
-        "- ???? summary ?????? ???? ?????? ?? ??????? ?????.\\n"
-        "- ??? markdown.\\n"
-        "- ??? ????????? ????? ?????? summary.\\n\\n"
-        f"?????????:\\n{text}\\n"
+        "You filter incoming Telegram messages and decide whether the author is looking for a contractor/executor for software development or integrations.\n"
+        "Return STRICT JSON (no extra text) in the format:\n"
+        '{\"is_lead\": true|false, \"summary\": \"1-2 sentences in Russian\", \"confidence\": 0.0-1.0}\n\n'
+        "Requirements:\n"
+        "- summary MUST be Russian only.\n"
+        "- No markdown.\n"
+        "- No newlines inside summary.\n\n"
+        f"Message:\n{text}\n"
     )
+
 
 def _try_parse_json(s: str) -> dict | None:
     s = s.strip()
@@ -158,7 +159,7 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "?? ????????? ???????? JSON. ??????? ?????? JSON. ??? ?????? ? JSON ?????? ???? ?? ???????."},
+            {"role": "system", "content": "You are a strict JSON generator. Output JSON only. All strings in JSON must be Russian."},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.2,
@@ -175,3 +176,84 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
     if not parsed:
         raise RuntimeError(f"failed to parse model output: {content[:200]}")
     return LLMResult.model_validate(parsed)
+
+
+async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple[list[str], str]:
+    """
+    Suggest additional stopwords/phrases (Russian) after a human marks a message as NOT a lead.
+    Returns (stopwords, model_used).
+    """
+    if not settings.cliproxy_base_url:
+        raise RuntimeError("cliproxy_base_url is not set")
+    if not settings.cliproxy_api_key:
+        raise RuntimeError("cliproxy_api_key is not set")
+
+    existing = [x.strip() for x in (existing_stopwords_text or "").splitlines() if x.strip()]
+    existing_preview = "\n".join(existing[:80])
+
+    prompt = (
+        "You help maintain a stopword list for filtering irrelevant Telegram messages.\n"
+        "Given a message that the user marked as NOT A LEAD, propose up to 6 NEW stopwords/phrases in Russian to block similar messages.\n"
+        "Do not propose generic words like 'и', 'это', 'работа'. Prefer short stems/phrases specific to the irrelevant topic.\n"
+        "Return STRICT JSON only:\n"
+        '{"stopwords": ["..."]}\n\n'
+        "Existing stopwords (sample):\n"
+        f"{existing_preview}\n\n"
+        "Message:\n"
+        f"{(text or '').strip()}\n"
+    )
+
+    async with httpx.AsyncClient() as client:
+        models = await list_models(client)
+        candidates = _select_models(models)
+        if not candidates:
+            raise RuntimeError("no available models")
+
+        last_err: Exception | None = None
+        for mid in candidates[: settings.llm_max_attempts]:
+            try:
+                url = f"{settings.cliproxy_base_url.rstrip('/')}/chat/completions"
+                body = {
+                    "model": mid,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a strict JSON generator. Output JSON only. All strings must be Russian.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.2,
+                }
+                r = await client.post(url, headers=_auth_headers(), json=body, timeout=settings.llm_timeout_s)
+                r.raise_for_status()
+                data = r.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                parsed = _try_parse_json(content)
+                if not parsed or "stopwords" not in parsed:
+                    raise RuntimeError(f"failed to parse stopwords: {content[:200]}")
+                arr = parsed.get("stopwords") or []
+                if not isinstance(arr, list):
+                    raise RuntimeError("stopwords is not a list")
+
+                out: list[str] = []
+                seen: set[str] = set(x.casefold() for x in existing)
+                for item in arr:
+                    if not isinstance(item, str):
+                        continue
+                    w = item.strip()
+                    if not w:
+                        continue
+                    if len(w) < 3:
+                        continue
+                    if w.casefold() in seen:
+                        continue
+                    seen.add(w.casefold())
+                    out.append(w)
+                    if len(out) >= 6:
+                        break
+                return out, mid
+            except Exception as e:
+                last_err = e
+                continue
+
+        raise RuntimeError(f"all stopword attempts failed: {last_err}") from last_err

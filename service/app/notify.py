@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import httpx
-
 from .config import settings
+from .tg_bot_api import send_message_html
 
 
 def utcnow() -> datetime:
@@ -20,7 +19,7 @@ def _escape_html(s: str) -> str:
     )
 
 
-async def send_lead_notification(*, excerpt: str, summary: str, link: str) -> None:
+async def send_lead_notification(*, event_id: int, excerpt: str, summary: str, link: str) -> None:
     if not settings.tg_bot_token or not settings.tg_chat_id:
         raise RuntimeError("tg_bot_token/tg_chat_id not set")
 
@@ -39,13 +38,12 @@ async def send_lead_notification(*, excerpt: str, summary: str, link: str) -> No
 
     text = "\n\n".join(parts) if parts else "Lead"
 
-    url = f"https://api.telegram.org/bot{settings.tg_bot_token}/sendMessage"
-    payload = {
-        "chat_id": settings.tg_chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+    reply_markup = {
+        "inline_keyboard": [
+            [{"text": "Лид", "callback_data": f"fb:lead:{event_id}"}],
+            [{"text": "Не лид", "callback_data": f"fb:not_lead:{event_id}"}],
+        ]
     }
-    async with httpx.AsyncClient() as client:
-        r = await client.post(url, json=payload, timeout=15.0)
-        r.raise_for_status()
+
+    await send_message_html(chat_id=settings.tg_chat_id, html=text, reply_markup=reply_markup)
+

@@ -54,6 +54,10 @@
       .brand h1 { margin: 0; font-size: 18px; letter-spacing: 0.2px; }
       .brand .sub { color: var(--muted); font-size: 12px; }
       .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 10px; border-radius: 10px; cursor:pointer; font-size: 12px; }
+      .stats { margin-top: 12px; display:grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 8px; }
+      .stat { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 10px; }
+      .stat .k { color: var(--muted); font-size: 11px; }
+      .stat .v { margin-top: 6px; font-size: 20px; font-weight: 700; line-height: 1; }
       .grid { margin-top: 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 14px; overflow: hidden; }
       table { width: 100%; border-collapse: collapse; }
       th, td { padding: 10px 10px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 12px; }
@@ -70,6 +74,8 @@
       .small { color: var(--muted); font-size: 11px; }
       .summary { margin-top: 4px; color: var(--muted); }
       .excerpt { max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      @media (max-width: 980px) { .stats { grid-template-columns: repeat(2, minmax(140px, 1fr)); } }
+      @media (max-width: 560px) { .stats { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -85,6 +91,17 @@
           <a class="btn" href="/discovery">Discovery</a>
           <a class="btn" href="/health">Health</a>
         </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="k">Всего сообщений</div><div class="v">{{ stats.total_messages }}</div></div>
+        <div class="stat"><div class="k">Лидов за день</div><div class="v">{{ stats.leads_day }}</div></div>
+        <div class="stat"><div class="k">Лидов за неделю</div><div class="v">{{ stats.leads_week }}</div></div>
+        <div class="stat"><div class="k">Лидов за месяц</div><div class="v">{{ stats.leads_month }}</div></div>
+        <div class="stat"><div class="k">Добавлено в discovery (день)</div><div class="v">{{ stats.added_today }}</div></div>
+        <div class="stat"><div class="k">Вступлений (день)</div><div class="v">{{ stats.joins_today }}</div></div>
+        <div class="stat"><div class="k">Выходов (день)</div><div class="v">{{ stats.leaves_today }}</div></div>
+        <div class="stat"><div class="k">Конверсия в лиды 30д</div><div class="v">{{ stats.lead_rate_month }}%</div></div>
       </div>
 
       <div class="grid">

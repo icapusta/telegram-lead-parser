@@ -538,6 +538,72 @@ async def process_event(event_id: int) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
+    now_msk = datetime.now(MSK_TZ)
+    day_start_msk = now_msk.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start_utc = day_start_msk.astimezone(timezone.utc)
+    week_cutoff_utc = (now_msk - timedelta(days=7)).astimezone(timezone.utc)
+    month_cutoff_utc = (now_msk - timedelta(days=30)).astimezone(timezone.utc)
+
+    total_messages = db.exec(select(func.count()).select_from(TgMonitorEvent)).one() or 0
+    leads_day = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= day_start_utc, TgMonitorEvent.is_lead == True)  # noqa: E712
+        ).one()
+        or 0
+    )
+    leads_week = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= week_cutoff_utc, TgMonitorEvent.is_lead == True)  # noqa: E712
+        ).one()
+        or 0
+    )
+    leads_month = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= month_cutoff_utc, TgMonitorEvent.is_lead == True)  # noqa: E712
+        ).one()
+        or 0
+    )
+    messages_month = (
+        db.exec(
+            select(func.count())
+            .select_from(TgMonitorEvent)
+            .where(TgMonitorEvent.created_at >= month_cutoff_utc)
+        ).one()
+        or 0
+    )
+    lead_rate_month = round((float(leads_month) / float(messages_month) * 100.0), 1) if int(messages_month) > 0 else 0.0
+
+    added_today = (
+        db.exec(
+            select(func.count())
+            .select_from(DiscoveryTarget)
+            .where(DiscoveryTarget.created_at >= day_start_utc)
+        ).one()
+        or 0
+    )
+    joins_today = (
+        db.exec(
+            select(func.count())
+            .select_from(DiscoveryLog)
+            .where(DiscoveryLog.created_at >= day_start_utc, DiscoveryLog.event == "join_ok")
+        ).one()
+        or 0
+    )
+    leaves_today = (
+        db.exec(
+            select(func.count())
+            .select_from(DiscoveryLog)
+            .where(DiscoveryLog.created_at >= day_start_utc, DiscoveryLog.event == "leave")
+        ).one()
+        or 0
+    )
+
     rows = db.exec(
         select(TgMonitorEvent).order_by(TgMonitorEvent.created_at.desc()).limit(200)
     ).all()
@@ -549,6 +615,16 @@ def dashboard(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
             "rows": rows,
             "public_base_url": settings.public_base_url.rstrip("/"),
             "cfg": cfg,
+            "stats": {
+                "total_messages": int(total_messages),
+                "leads_day": int(leads_day),
+                "leads_week": int(leads_week),
+                "leads_month": int(leads_month),
+                "added_today": int(added_today),
+                "joins_today": int(joins_today),
+                "leaves_today": int(leaves_today),
+                "lead_rate_month": lead_rate_month,
+            },
         },
     )
 

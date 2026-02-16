@@ -11,11 +11,13 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _escape_md(s: str) -> str:
-    # Minimal escaping for MarkdownV2 to avoid broken formatting.
-    for ch in r"_*[]()~`>#+-=|{}.!":
-        s = s.replace(ch, f"\\{ch}")
-    return s
+def _escape_html(s: str) -> str:
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 async def send_lead_notification(*, excerpt: str, summary: str, link: str) -> None:
@@ -26,24 +28,24 @@ async def send_lead_notification(*, excerpt: str, summary: str, link: str) -> No
     summary = (summary or "").strip()
     link = (link or "").strip()
 
-    text_parts: list[str] = []
+    parts: list[str] = []
     if excerpt:
-        text_parts.append(f"*Запрос:* {_escape_md(excerpt)}")
+        parts.append(f"<b>Запрос:</b> {_escape_html(excerpt)}")
     if summary:
-        text_parts.append(f"*Кратко:* {_escape_md(summary)}")
+        parts.append(f"<b>Кратко:</b> {_escape_html(summary)}")
     if link:
-        text_parts.append(f"*Ссылка:* {_escape_md(link)}")
+        safe_link = _escape_html(link)
+        parts.append(f"<b>Ссылка:</b> <a href=\"{safe_link}\">открыть</a>")
 
-    text = "\n\n".join(text_parts) if text_parts else "Lead"
+    text = "\n\n".join(parts) if parts else "Lead"
 
     url = f"https://api.telegram.org/bot{settings.tg_bot_token}/sendMessage"
     payload = {
         "chat_id": settings.tg_chat_id,
         "text": text,
-        "parse_mode": "MarkdownV2",
+        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
     async with httpx.AsyncClient() as client:
         r = await client.post(url, json=payload, timeout=15.0)
         r.raise_for_status()
-

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+from urllib.parse import quote_plus, unquote
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -157,6 +158,10 @@ JOIN_BUDGET_PATH = os.environ.get("JOIN_BUDGET_PATH", "/data/join_budget.json")
 AGENT_STATE_PATH = os.environ.get("AGENT_STATE_PATH", "/data/agent_state.json")
 
 DEFAULT_AUTO_LEAVE_IF_NO_CANDIDATES = env_bool("AUTO_LEAVE_IF_NO_CANDIDATES", True)
+EXTERNAL_SEARCH_ENABLED = env_bool("EXTERNAL_SEARCH_ENABLED", True)
+SEARCH_ENGINE_ENABLED = env_bool("SEARCH_ENGINE_ENABLED", True)
+TGSTAT_SEARCH_ENABLED = env_bool("TGSTAT_SEARCH_ENABLED", True)
+EXTERNAL_RESULTS_PER_QUERY = env_int("EXTERNAL_RESULTS_PER_QUERY", 8)
 
 
 client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
@@ -169,11 +174,16 @@ class AgentState:
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"seen_usernames": []}
+            return {"seen_usernames": [], "seen_targets": []}
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if "seen_usernames" not in data:
+                data["seen_usernames"] = []
+            if "seen_targets" not in data:
+                data["seen_targets"] = []
+            return data
         except Exception:
-            return {"seen_usernames": []}
+            return {"seen_usernames": [], "seen_targets": []}
 
     def _save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -194,6 +204,22 @@ class AgentState:
         arr.append(u)
         # keep last 2000
         self.data["seen_usernames"] = arr[-2000:]
+        self._save()
+
+    def seen_target(self, target: str) -> bool:
+        t = (target or "").casefold()
+        return t in set(x.casefold() for x in (self.data.get("seen_targets") or []))
+
+    def mark_target(self, target: str) -> None:
+        t = (target or "").strip()
+        if not t:
+            return
+        arr = list(self.data.get("seen_targets") or [])
+        if t.casefold() in set(x.casefold() for x in arr):
+            return
+        arr.append(t)
+        # keep last 5000
+        self.data["seen_targets"] = arr[-5000:]
         self._save()
 
 
@@ -279,10 +305,92 @@ async def _remove_from_business(peer) -> bool:
 
 def _extract_invite_hash(url: str) -> str | None:
     u = (url or "").strip()
-    m = re.search(r"t\\.me/(?:joinchat/|\\+)([A-Za-z0-9_-]+)", u)
+    m = re.search(r"t\.me/(?:joinchat/|\+)([A-Za-z0-9_-]+)", u)
     if m:
         return m.group(1)
     return None
+
+
+def _extract_username_from_target(target: str) -> str | None:
+    t = (target or "").strip()
+    if not t:
+        return None
+    m = re.search(r"(?:https?://)?t\.me/([A-Za-z0-9_]{5,})", t)
+    if m:
+        return m.group(1).casefold()
+    if t.startswith("@") and len(t) >= 6:
+        return t[1:].casefold()
+    # plain username
+    if re.fullmatch(r"[A-Za-z0-9_]{5,}", t):
+        return t.casefold()
+    return None
+
+
+def _target_key(target: str) -> str:
+    inv = _extract_invite_hash(target)
+    if inv:
+        return f"invite:{inv.casefold()}"
+    u = _extract_username_from_target(target)
+    if u:
+        return f"user:{u}"
+    return (target or "").strip().casefold()
+
+
+def _extract_tme_targets_from_text(text: str) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    src = text or ""
+    for m in re.finditer(r"(https?://t\.me/[A-Za-z0-9_+/.-]+)", src):
+        t = m.group(1).rstrip(").,;")
+        k = _target_key(t)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+    # capture @username mentions as fallback
+    for m in re.finditer(r"@([A-Za-z0-9_]{5,})", src):
+        t = "@" + m.group(1)
+        k = _target_key(t)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+    return out
+
+
+async def _search_engine_targets(query: str) -> list[str]:
+    # DuckDuckGo HTML SERP as a lightweight source for t.me links.
+    q = f"site:t.me {query}"
+    url = f"https://duckduckgo.com/html/?q={quote_plus(q)}"
+    try:
+        async with httpx.AsyncClient() as h:
+            r = await h.get(url, timeout=12.0)
+            r.raise_for_status()
+            html = r.text
+    except Exception:
+        return []
+
+    # decode redirected URLs if present.
+    decoded = html
+    for m in re.finditer(r"uddg=([^\"&]+)", html):
+        try:
+            decoded += "\n" + unquote(m.group(1))
+        except Exception:
+            continue
+    return _extract_tme_targets_from_text(decoded)[:EXTERNAL_RESULTS_PER_QUERY]
+
+
+async def _tgstat_targets(query: str) -> list[str]:
+    # TGStat search pages often contain references to telegram links.
+    url = f"https://tgstat.ru/search?search={quote_plus(query)}"
+    try:
+        async with httpx.AsyncClient() as h:
+            r = await h.get(url, timeout=12.0)
+            r.raise_for_status()
+            html = r.text
+    except Exception:
+        return []
+    return _extract_tme_targets_from_text(html)[:EXTERNAL_RESULTS_PER_QUERY]
 
 
 async def _join_target(target: str):
@@ -293,7 +401,7 @@ async def _join_target(target: str):
     if inv:
         return await client(functions.messages.ImportChatInviteRequest(hash=inv))
     # username or t.me/username
-    m = re.search(r"(?:https?://)?t\\.me/([A-Za-z0-9_]{5,})", target)
+    m = re.search(r"(?:https?://)?t\.me/([A-Za-z0-9_]{5,})", target)
     username = m.group(1) if m else target.lstrip("@")
     ent = await client.get_entity(username)
     await client(functions.channels.JoinChannelRequest(channel=ent))
@@ -410,6 +518,42 @@ async def _scan_recent_messages(entity, cfg: FilterConfig, dcfg: DiscoveryConfig
     return hard_candidates, llm_positive
 
 
+async def _post_join_flow(channel_entity, *, cfg: FilterConfig, dcfg: DiscoveryConfig, username_for_log: str, query: str) -> None:
+    # Add to Business folder.
+    try:
+        peer = await client.get_input_entity(channel_entity)
+        ok = await _add_to_business(peer)
+        await _log("info", "business_add", f"ok={ok}", chat_username=username_for_log, query=query)
+    except Exception as e:
+        await _log("warn", "business_add_failed", str(e), chat_username=username_for_log, query=query)
+
+    # Scan history; leave if no LLM candidates.
+    try:
+        hard_cands, llm_cands = await _scan_recent_messages(channel_entity, cfg, dcfg)
+        await _log(
+            "info",
+            "scan",
+            f"hard_candidates={hard_cands}, llm_candidates={llm_cands}",
+            chat_username=username_for_log,
+            query=query,
+        )
+        if dcfg.auto_leave_if_no_candidates and llm_cands == 0:
+            try:
+                await client(functions.channels.LeaveChannelRequest(channel=channel_entity))
+                try:
+                    peer = await client.get_input_entity(channel_entity)
+                    await _remove_from_business(peer)
+                except Exception:
+                    pass
+                await _log("info", "leave", "no_llm_candidates", chat_username=username_for_log, query=query)
+            except Exception as e:
+                await _log("error", "leave_failed", str(e), chat_username=username_for_log, query=query)
+        elif llm_cands > 0:
+            await _log("info", "keep", "llm_candidate_found", chat_username=username_for_log, query=query)
+    except Exception as e:
+        await _log("error", "scan_failed", str(e), chat_username=username_for_log, query=query)
+
+
 async def discovery_loop() -> None:
     budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=DEFAULT_JOIN_PER_DAY, per_hour=DEFAULT_JOIN_PER_HOUR)
     state = AgentState(AGENT_STATE_PATH)
@@ -474,41 +618,82 @@ async def discovery_loop() -> None:
                         await _log("error", "join_failed", str(e), chat_username=f"@{username}", query=q)
                         continue
 
-                    # Add to Business folder.
-                    try:
-                        peer = await client.get_input_entity(ch)
-                        ok = await _add_to_business(peer)
-                        await _log("info", "business_add", f"ok={ok}", chat_username=f"@{username}", query=q)
-                    except Exception as e:
-                        await _log("warn", "business_add_failed", str(e), chat_username=f"@{username}", query=q)
-
-                    # Scan last N days; if LLM found no leads, optionally leave.
-                    try:
-                        hard_cands, llm_cands = await _scan_recent_messages(ch, cfg, dcfg)
-                        await _log(
-                            "info",
-                            "scan",
-                            f"hard_candidates={hard_cands}, llm_candidates={llm_cands}",
-                            chat_username=f"@{username}",
-                            query=q,
-                        )
-                        if dcfg.auto_leave_if_no_candidates and llm_cands == 0:
-                            try:
-                                await client(functions.channels.LeaveChannelRequest(channel=ch))
-                                try:
-                                    peer = await client.get_input_entity(ch)
-                                    await _remove_from_business(peer)
-                                except Exception:
-                                    pass
-                                await _log("info", "leave", "no_llm_candidates", chat_username=f"@{username}", query=q)
-                            except Exception as e:
-                                await _log("error", "leave_failed", str(e), chat_username=f"@{username}", query=q)
-                        elif llm_cands > 0:
-                            await _log("info", "keep", "llm_candidate_found", chat_username=f"@{username}", query=q)
-                    except Exception as e:
-                        await _log("error", "scan_failed", str(e), chat_username=f"@{username}", query=q)
+                    await _post_join_flow(ch, cfg=cfg, dcfg=dcfg, username_for_log=f"@{username}", query=q)
 
                     # Small pause between joins to be gentle.
+                    await asyncio.sleep(8)
+
+                # Extra sources: search engines + TGStat.
+                external_targets: list[str] = []
+                if EXTERNAL_SEARCH_ENABLED:
+                    if SEARCH_ENGINE_ENABLED:
+                        external_targets.extend(await _search_engine_targets(q))
+                    if TGSTAT_SEARCH_ENABLED:
+                        external_targets.extend(await _tgstat_targets(q))
+
+                # Dedupe by normalized key and cap attempts per query.
+                uniq_targets: list[str] = []
+                seen_keys: set[str] = set()
+                for t in external_targets:
+                    k = _target_key(t)
+                    if not k or k in seen_keys:
+                        continue
+                    seen_keys.add(k)
+                    uniq_targets.append(t)
+                    if len(uniq_targets) >= EXTERNAL_RESULTS_PER_QUERY:
+                        break
+
+                if uniq_targets:
+                    await _log("info", "external_search", f"targets={len(uniq_targets)}", query=q)
+
+                for target in uniq_targets:
+                    can, why = budget.can_join()
+                    if not can:
+                        await _log("warn", "budget_block", why, query=q)
+                        break
+
+                    tk = _target_key(target)
+                    if state.seen_target(tk):
+                        continue
+                    state.mark_target(tk)
+
+                    username = _extract_username_from_target(target)
+                    if username and state.seen(username):
+                        continue
+                    if username:
+                        state.mark_seen(username)
+
+                    display_name = ("@" + username) if username else target
+                    try:
+                        await _log("info", "join_try", f"joining external target={target}", chat_username=display_name, query=q)
+                        joined = await _join_target(target)
+                        budget.mark_join()
+                        await _log("info", "join_ok", "joined external", chat_username=display_name, query=q)
+                    except UserAlreadyParticipantError:
+                        await _log("info", "join_ok", "already_participant external", chat_username=display_name, query=q)
+                        try:
+                            joined = await client.get_entity(username or target)
+                        except Exception:
+                            joined = None
+                    except Exception as e:
+                        await _log("error", "join_failed", str(e), chat_username=display_name, query=q)
+                        continue
+
+                    # Resolve a channel-like entity for post-join processing.
+                    channel_entity = None
+                    if isinstance(joined, types.Channel):
+                        channel_entity = joined
+                    else:
+                        try:
+                            channel_entity = await client.get_entity(username or target)
+                        except Exception:
+                            channel_entity = None
+
+                    if not isinstance(channel_entity, types.Channel):
+                        await _log("warn", "skip_non_channel", "joined target is not channel/group", chat_username=display_name, query=q)
+                        continue
+
+                    await _post_join_flow(channel_entity, cfg=cfg, dcfg=dcfg, username_for_log=display_name, query=q)
                     await asyncio.sleep(8)
 
             await asyncio.sleep(max(60.0, float(dcfg.interval_s)))

@@ -792,6 +792,7 @@ async def discovery_loop() -> None:
     budget = JoinBudget(path=JOIN_BUDGET_PATH, per_day=DEFAULT_JOIN_PER_DAY, per_hour=DEFAULT_JOIN_PER_HOUR)
     search_budget = JoinBudget(path=SEARCH_BUDGET_PATH, per_day=DEFAULT_SEARCH_REQUESTS_PER_DAY, per_hour=DEFAULT_SEARCH_REQUESTS_PER_HOUR)
     state = AgentState(AGENT_STATE_PATH)
+    last_query_run_at: datetime | None = None
     while True:
         try:
             cfg, dcfg = await _fetch_runtime_config()
@@ -805,6 +806,12 @@ async def discovery_loop() -> None:
                 continue
 
             await _process_pending_targets(cfg, dcfg, budget, state)
+            now = utcnow()
+            if last_query_run_at and (now - last_query_run_at).total_seconds() < dcfg.interval_s:
+                # Poll pending queue often, but keep search scans on configured interval.
+                await asyncio.sleep(20)
+                continue
+            last_query_run_at = now
             await _log("info", "tick", f"queries={len(dcfg.queries)} interval={int(dcfg.interval_s)}s")
             processed_queries = 0
             for q in dcfg.queries:
@@ -1016,10 +1023,10 @@ async def discovery_loop() -> None:
                     )
                     await asyncio.sleep(8)
 
-            await asyncio.sleep(max(60.0, float(dcfg.interval_s)))
+            await asyncio.sleep(20)
         except Exception as e:
             await _log("error", "loop_error", str(e))
-            await asyncio.sleep(60)
+            await asyncio.sleep(20)
 
 
 async def monitor_loop() -> None:

@@ -45,24 +45,49 @@ def _is_model_allowed(mi: ModelInfo) -> bool:
     mid = (mi.id or "").casefold()
     if "icapusta@gmail.com" in mid or "weflyinsky@gmail.com" in mid:
         return False
+    # Avoid non-chat models and noisy utility models.
+    if any(x in mid for x in ("whisper", "guard", "vision", "image", "audio", "tts", "stt")):
+        return False
     return True
 
 
+def _preferred_match(available_id: str, preferred: str) -> bool:
+    aid = (available_id or "").casefold()
+    p = (preferred or "").casefold()
+    if not aid or not p:
+        return False
+    if aid == p:
+        return True
+    # Common in CLIProxy: suffixes like "-openrouter" or provider prefixes like "z.ai-".
+    if aid.startswith(p + "-") or aid.endswith("-" + p):
+        return True
+    if p in aid:
+        return True
+    return False
+
+
 def _select_models(available: Iterable[ModelInfo]) -> list[str]:
-    avail_map = {m.id: m for m in available}
+    avail_list = list(available)
+    avail_map = {m.id: m for m in avail_list}
     picked: list[str] = []
 
     for mid in _default_model_priority():
+        # First exact hit.
         mi = avail_map.get(mid)
-        if not mi:
+        if mi and _is_model_allowed(mi):
+            picked.append(mi.id)
             continue
-        if not _is_model_allowed(mi):
-            continue
-        picked.append(mid)
+        # Then fuzzy match to tolerate provider suffix/prefix variants.
+        for cand in avail_list:
+            if not _is_model_allowed(cand):
+                continue
+            if _preferred_match(cand.id, mid):
+                picked.append(cand.id)
+                break
 
     # If our priority list doesn't intersect, fallback to anything allowed.
     if not picked:
-        for mi in available:
+        for mi in avail_list:
             if _is_model_allowed(mi):
                 picked.append(mi.id)
                 if len(picked) >= 10:
@@ -158,8 +183,10 @@ async def classify(text: str) -> tuple[LLMResult, str]:
 
 
 async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) -> LLMResult:
-    url = f"{settings.cliproxy_base_url.rstrip('/')}/chat/completions"
-    body = {
+    base = settings.cliproxy_base_url.rstrip("/")
+    headers = _auth_headers()
+
+    chat_body = {
         "model": model,
         "messages": [
             {"role": "system", "content": "You are a strict JSON generator. Output JSON only. All strings in JSON must be Russian."},
@@ -167,18 +194,50 @@ async def _chat_completions(client: httpx.AsyncClient, model: str, prompt: str) 
         ],
         "temperature": 0.2,
     }
-    r = await client.post(url, headers=_auth_headers(), json=body, timeout=settings.llm_timeout_s)
-    r.raise_for_status()
-    data = r.json()
-    content = (
-        data.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    parsed = _try_parse_json(content)
-    if not parsed:
-        raise RuntimeError(f"failed to parse model output: {content[:200]}")
-    return LLMResult.model_validate(parsed)
+
+    response_body = {
+        "model": model,
+        "input": prompt,
+        "temperature": 0.2,
+    }
+
+    attempts: list[tuple[str, dict]] = [
+        (f"{base}/chat/completions", chat_body),
+        (f"{base}/responses", response_body),
+    ]
+    # Compatibility fallback for providers exposing endpoints without /v1 prefix.
+    if base.endswith("/v1"):
+        attempts.append((f"{base[:-3]}/chat/completions", chat_body))
+        attempts.append((f"{base[:-3]}/responses", response_body))
+
+    last_err: Exception | None = None
+    for url, body in attempts:
+        try:
+            r = await client.post(url, headers=headers, json=body, timeout=settings.llm_timeout_s)
+            r.raise_for_status()
+            data = r.json()
+            content = (
+                data.get("choices", [{}])[0].get("message", {}).get("content")
+                or data.get("output_text", "")
+            )
+            if not content and isinstance(data.get("output"), list):
+                for out in data.get("output", []):
+                    for part in out.get("content", []) or []:
+                        txt = part.get("text")
+                        if txt:
+                            content = txt
+                            break
+                    if content:
+                        break
+            parsed = _try_parse_json(content or "")
+            if not parsed:
+                raise RuntimeError(f"failed to parse model output: {(content or '')[:200]}")
+            return LLMResult.model_validate(parsed)
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise RuntimeError(f"llm endpoint attempts failed: {last_err}") from last_err
 
 
 async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple[list[str], str]:
@@ -215,8 +274,8 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
         last_err: Exception | None = None
         for mid in candidates[: settings.llm_max_attempts]:
             try:
-                url = f"{settings.cliproxy_base_url.rstrip('/')}/chat/completions"
-                body = {
+                base = settings.cliproxy_base_url.rstrip("/")
+                chat_body = {
                     "model": mid,
                     "messages": [
                         {
@@ -227,10 +286,40 @@ async def suggest_stopwords(*, text: str, existing_stopwords_text: str) -> tuple
                     ],
                     "temperature": 0.2,
                 }
-                r = await client.post(url, headers=_auth_headers(), json=body, timeout=settings.llm_timeout_s)
-                r.raise_for_status()
-                data = r.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                response_body = {"model": mid, "input": prompt, "temperature": 0.2}
+                attempts: list[tuple[str, dict]] = [
+                    (f"{base}/chat/completions", chat_body),
+                    (f"{base}/responses", response_body),
+                ]
+                if base.endswith("/v1"):
+                    attempts.append((f"{base[:-3]}/chat/completions", chat_body))
+                    attempts.append((f"{base[:-3]}/responses", response_body))
+
+                data = None
+                for url, body in attempts:
+                    try:
+                        r = await client.post(url, headers=_auth_headers(), json=body, timeout=settings.llm_timeout_s)
+                        r.raise_for_status()
+                        data = r.json()
+                        break
+                    except Exception:
+                        continue
+                if not data:
+                    raise RuntimeError("stopwords endpoint attempts failed")
+
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content")
+                    or data.get("output_text", "")
+                )
+                if not content and isinstance(data.get("output"), list):
+                    for out in data.get("output", []):
+                        for part in out.get("content", []) or []:
+                            txt = part.get("text")
+                            if txt:
+                                content = txt
+                                break
+                        if content:
+                            break
                 parsed = _try_parse_json(content)
                 if not parsed or "stopwords" not in parsed:
                     raise RuntimeError(f"failed to parse stopwords: {content[:200]}")

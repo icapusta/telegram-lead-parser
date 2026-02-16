@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # HTTP
     host: str = "0.0.0.0"
     port: int = 8080
-    public_base_url: str = Field(default="https://parser.tunecrm.ru", validation_alias="PUBLIC_BASE_URL")
+    public_base_url: str = Field(default="https://parser.tunecrm.su", validation_alias="PUBLIC_BASE_URL")
 
     # Storage
     db_url: str = Field(default="sqlite:////data/app.db", validation_alias="DB_URL")

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AmoCRM</title>
+    <script>
+      (function () {
+        const saved = localStorage.getItem("theme");
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+      })();
+      function toggleTheme() {
+        const cur = document.documentElement.dataset.theme || "light";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem("theme", next);
+      }
+    </script>
+    <style>
+      :root { --bg:#0b0d10; --panel:#11151b; --text:#e7eef7; --muted:#9db0c4; --border:rgba(255,255,255,.1); }
+      :root[data-theme="light"] { --bg:#f6f7fb; --panel:#fff; --text:#0f172a; --muted:#475569; --border:rgba(2,6,23,.1); }
+      body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui; }
+      .wrap { max-width:1000px; margin:24px auto; padding:0 16px; }
+      .top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; text-decoration:none; cursor:pointer; white-space:nowrap; }
+      .actions { display:flex; gap:8px; flex-wrap:wrap; }
+      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
+      .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+      label { display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }
+      input { width:100%; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:10px; padding:10px; }
+      .save { margin-top:12px; display:flex; justify-content:flex-end; }
+      .hint { color:var(--muted); font-size:12px; margin-top:8px; }
+      .ok { color:#2ecc71; }
+      @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <h2 style="margin:0;">AmoCRM</h2>
+        <div class="actions">
+          <a class="btn" href="/">Дашборд</a>
+          <a class="btn" href="/settings">Настройки</a>
+          <a class="btn" href="/amo/leads">Заявки amo</a>
+          <button class="btn" onclick="toggleTheme()">Сменить тему</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="hint">Статус: {% if connected %}<span class="ok">подключено</span>{% else %}не подключено{% endif %}</div>
+        <form method="post" action="/amo/settings">
+          <div class="grid">
+            <div><label><input type="checkbox" name="amo_enabled" value="true" {% if cfg.amo_enabled %}checked{% endif %}/> Включить обработку amo</label></div>
+            <div><label>Поддомен amo (без .amocrm.ru)</label><input name="amo_subdomain" value="{{ cfg.amo_subdomain }}" /></div>
+            <div><label>Client ID</label><input name="amo_client_id" value="{{ cfg.amo_client_id }}" /></div>
+            <div><label>Client Secret</label><input name="amo_client_secret" value="{{ cfg.amo_client_secret }}" /></div>
+            <div><label>Redirect URI</label><input name="amo_redirect_uri" value="{{ cfg.amo_redirect_uri }}" /></div>
+            <div><label>Webhook secret (опционально)</label><input name="amo_webhook_secret" value="{{ cfg.amo_webhook_secret }}" /></div>
+            <div><label>ID воронки</label><input name="amo_pipeline_id" value="{{ cfg.amo_pipeline_id }}" /></div>
+            <div><label>ID этапа "Неразобранное"</label><input name="amo_status_unprocessed_id" value="{{ cfg.amo_status_unprocessed_id }}" /></div>
+            <div><label>ID этапа "Первичный контакт"</label><input name="amo_status_primary_contact_id" value="{{ cfg.amo_status_primary_contact_id }}" /></div>
+          </div>
+          <div class="save"><button class="btn" type="submit">Сохранить</button></div>
+        </form>
+        <div class="actions" style="margin-top:10px;">
+          <a class="btn" href="/api/amo/oauth/start">Подключить amo (OAuth)</a>
+        </div>
+        <div class="hint">Webhook URL: <code>{{ cfg.amo_redirect_uri|replace('/api/amo/oauth/callback','/api/amo/webhook') }}</code></div>
+      </div>
+    </div>
+  </body>
+</html>
+

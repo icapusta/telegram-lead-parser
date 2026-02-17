@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Заявки amo</title>
+    <script>
+      (function () {
+        const saved = localStorage.getItem("theme");
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+      })();
+      function toggleTheme() {
+        const cur = document.documentElement.dataset.theme || "light";
+        const next = cur === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem("theme", next);
+      }
+    </script>
+    <style>
+      :root { --bg:#0b0d10; --panel:#11151b; --text:#e7eef7; --muted:#9db0c4; --border:rgba(255,255,255,.1); --ok:#2ecc71; --bad:#ff5c7a; }
+      :root[data-theme="light"] { --bg:#f6f7fb; --panel:#fff; --text:#0f172a; --muted:#475569; --border:rgba(2,6,23,.1); }
+      body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui; }
+      .wrap { max-width:1200px; margin:24px auto; padding:0 16px; }
+      .top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; text-decoration:none; cursor:pointer; white-space:nowrap; }
+      .actions { display:flex; gap:8px; flex-wrap:wrap; }
+      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
+      table { width:100%; border-collapse:collapse; min-width:1000px; }
+      th, td { border-bottom:1px solid var(--border); padding:8px; text-align:left; font-size:12px; vertical-align:top; }
+      th { color:var(--muted); }
+      .pill { border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; }
+      .ok { color:var(--ok); }
+      .bad { color:var(--bad); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <h2 style="margin:0;">Заявки amo</h2>
+        <div class="actions">
+          <a class="btn" href="/amo">AmoCRM</a>
+          <a class="btn" href="/">Дашборд</a>
+          <button class="btn" onclick="toggleTheme()">Сменить тему</button>
+        </div>
+      </div>
+      <div class="card" style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Время</th>
+              <th>Lead ID</th>
+              <th>Статус</th>
+              <th>Решение</th>
+              <th>Ошибка</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>{{ r.id }}</td>
+              <td>{{ msk_hhmm(r.updated_at) }}</td>
+              <td>{{ r.amo_lead_id }}</td>
+              <td><span class="pill {% if r.status in ['accepted'] %}ok{% elif r.status in ['error','rejected'] %}bad{% endif %}">{{ r.status }}</span></td>
+              <td>{{ r.decision or "-" }}</td>
+              <td>{{ r.error }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
+

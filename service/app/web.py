@@ -4,6 +4,8 @@ import asyncio
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
+import re
 
 import httpx
 from fastapi import FastAPI, Request, Depends, HTTPException, Form
@@ -15,7 +17,7 @@ from sqlmodel import select
 
 from .config import settings
 from .db import init_db, session
-from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog, DiscoveryTarget, LLMModelStat
+from .models import TgMonitorEvent, EventStatus, AppSettings, DiscoveryLog, DiscoveryTarget, LLMModelStat, AmoLeadInbox
 from .schemas import (
     TgMonitorPayload,
     InternalClassifyRequest,
@@ -358,6 +360,18 @@ def _get_settings(db) -> AppSettings:
         if row.llm_timeout_s <= 0:
             row.llm_timeout_s = 15.0
             need_update = True
+        if (row.amo_pipeline_id or 0) <= 0:
+            row.amo_pipeline_id = 4301503
+            need_update = True
+        if (row.amo_status_unprocessed_id or 0) <= 0:
+            row.amo_status_unprocessed_id = 40181908
+            need_update = True
+        if (row.amo_status_primary_contact_id or 0) <= 0:
+            row.amo_status_primary_contact_id = 40181911
+            need_update = True
+        if not (row.amo_redirect_uri or "").strip():
+            row.amo_redirect_uri = settings.public_base_url.rstrip("/") + "/api/amo/oauth/callback"
+            need_update = True
         if need_update:
             db.add(row)
             db.commit()
@@ -368,6 +382,10 @@ def _get_settings(db) -> AppSettings:
         discovery_queries_text=DEFAULT_DISCOVERY_QUERIES_TEXT,
         llm_model_priority_text=default_model_priority_text(),
         llm_models_config_json="{}",
+        amo_pipeline_id=4301503,
+        amo_status_unprocessed_id=40181908,
+        amo_status_primary_contact_id=40181911,
+        amo_redirect_uri=settings.public_base_url.rstrip("/") + "/api/amo/oauth/callback",
     )
     db.add(row)
     db.commit()
@@ -383,6 +401,124 @@ def _llm_opts(cfg: AppSettings) -> LLMRoutingOptions:
         exclude_openai_owned_models=bool(cfg.exclude_openai_owned_models),
         models_config_json=cfg.llm_models_config_json or "{}",
     )
+
+
+def _amo_base_url(cfg: AppSettings) -> str:
+    sub = (cfg.amo_subdomain or "").strip()
+    if not sub:
+        raise RuntimeError("amo_subdomain not configured")
+    if sub.startswith("http://") or sub.startswith("https://"):
+        return sub.rstrip("/")
+    return f"https://{sub}.amocrm.ru"
+
+
+async def _amo_refresh_token_if_needed(db, cfg: AppSettings) -> None:
+    now = utcnow()
+    if cfg.amo_access_token and cfg.amo_token_expires_at and cfg.amo_token_expires_at > (now + timedelta(minutes=2)):
+        return
+    if not cfg.amo_refresh_token:
+        raise RuntimeError("amo refresh_token missing")
+    base = _amo_base_url(cfg)
+    payload = {
+        "client_id": cfg.amo_client_id,
+        "client_secret": cfg.amo_client_secret,
+        "grant_type": "refresh_token",
+        "refresh_token": cfg.amo_refresh_token,
+        "redirect_uri": cfg.amo_redirect_uri,
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{base}/oauth2/access_token", json=payload, timeout=25.0)
+    if r.status_code >= 400:
+        raise RuntimeError(f"amo token refresh failed: {r.text[:300]}")
+    data = r.json()
+    cfg.amo_access_token = str(data.get("access_token") or "")
+    cfg.amo_refresh_token = str(data.get("refresh_token") or cfg.amo_refresh_token)
+    expires_in = int(data.get("expires_in") or 3600)
+    cfg.amo_token_expires_at = now + timedelta(seconds=max(60, expires_in - 30))
+    db.add(cfg)
+    db.commit()
+
+
+async def _amo_api_json(
+    db,
+    cfg: AppSettings,
+    *,
+    method: str,
+    path: str,
+    json_body: dict | list | None = None,
+    params: dict | None = None,
+) -> dict:
+    await _amo_refresh_token_if_needed(db, cfg)
+    base = _amo_base_url(cfg)
+    headers = {"Authorization": f"Bearer {cfg.amo_access_token}"}
+    async with httpx.AsyncClient() as client:
+        r = await client.request(
+            method=method.upper(),
+            url=f"{base}{path}",
+            json=json_body,
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+    if r.status_code >= 400:
+        raise RuntimeError(f"amo api {method} {path} failed: {r.status_code} {r.text[:300]}")
+    if r.text.strip():
+        try:
+            return r.json()
+        except Exception:
+            return {}
+    return {}
+
+
+async def _amo_accept_lead(db, cfg: AppSettings, lead_id: int) -> dict:
+    body = [
+        {
+            "id": int(lead_id),
+            "pipeline_id": int(cfg.amo_pipeline_id),
+            "status_id": int(cfg.amo_status_primary_contact_id),
+        }
+    ]
+    await _amo_api_json(db, cfg, method="PATCH", path="/api/v4/leads", json_body=body)
+    lead = await _amo_api_json(db, cfg, method="GET", path=f"/api/v4/leads/{int(lead_id)}")
+    return lead or {"id": int(lead_id)}
+
+
+async def _process_amo_accept_async(inbox_id: int) -> None:
+    with session() as db:
+        row = db.exec(select(AmoLeadInbox).where(AmoLeadInbox.id == inbox_id)).first()
+        if not row:
+            return
+        cfg = _get_settings(db)
+        try:
+            row.status = "processing_accept"
+            row.updated_at = utcnow()
+            db.add(row)
+            db.commit()
+
+            lead = await _amo_accept_lead(db, cfg, int(row.amo_lead_id))
+            row.status = "accepted"
+            row.result_json = json.dumps(lead, ensure_ascii=False)
+            row.updated_at = utcnow()
+            db.add(row)
+            db.commit()
+
+            if settings.tg_chat_id:
+                lead_name = (lead.get("name") if isinstance(lead, dict) else "") or f"Сделка #{row.amo_lead_id}"
+                await send_message_html(
+                    chat_id=settings.tg_chat_id,
+                    html=f"<b>amo: сделка принята</b><br/>ID: {row.amo_lead_id}<br/>Название: {str(lead_name).replace('<','&lt;').replace('>','&gt;')}",
+                )
+        except Exception as e:
+            row.status = "error"
+            row.error = str(e)[:800]
+            row.updated_at = utcnow()
+            db.add(row)
+            db.commit()
+            if settings.tg_chat_id:
+                await send_message_html(
+                    chat_id=settings.tg_chat_id,
+                    html=f"<b>amo: ошибка принятия сделки</b><br/>ID: {row.amo_lead_id}<br/>{str(e)[:300].replace('<','&lt;').replace('>','&gt;')}",
+                )
 
 
 def _parse_models_cfg_json(raw: str | None) -> dict[str, dict]:
@@ -402,6 +538,40 @@ def _parse_models_cfg_json(raw: str | None) -> dict[str, dict]:
             continue
         out[k.strip()] = v
     return out
+
+
+def _extract_amo_lead_ids(raw_text: str, payload_json: dict | None) -> list[int]:
+    out: list[int] = []
+    if isinstance(payload_json, dict):
+        try:
+            emb = payload_json.get("_embedded") or {}
+            leads = emb.get("leads") or []
+            if isinstance(leads, list):
+                for x in leads:
+                    if isinstance(x, dict) and x.get("id"):
+                        out.append(int(x.get("id")))
+        except Exception:
+            pass
+    # amo legacy webhooks may contain keys like leads[add][0][id]=123
+    for m in re.findall(r"leads\[[^\]]+\]\[\d+\]\[id\]=(\d+)", raw_text or ""):
+        try:
+            out.append(int(m))
+        except Exception:
+            pass
+    # fallback generic pattern for id values in form-encoded dump
+    for m in re.findall(r"\[id\]=(\d+)", raw_text or ""):
+        try:
+            out.append(int(m))
+        except Exception:
+            pass
+    dedup: list[int] = []
+    seen: set[int] = set()
+    for x in out:
+        if x <= 0 or x in seen:
+            continue
+        seen.add(x)
+        dedup.append(x)
+    return dedup
 
 
 def _utc_day_key(dt: datetime | None = None) -> str:
@@ -506,6 +676,13 @@ def internal_settings(db=Depends(_db), _it=Depends(_require_internal_token)) -> 
         "search_requests_per_hour": cfg.search_requests_per_hour,
         "queries_per_tick": cfg.queries_per_tick,
         "search_results_per_query": cfg.search_results_per_query,
+        "amo_enabled": cfg.amo_enabled,
+        "amo_subdomain": cfg.amo_subdomain,
+        "amo_client_id": cfg.amo_client_id,
+        "amo_redirect_uri": cfg.amo_redirect_uri,
+        "amo_pipeline_id": cfg.amo_pipeline_id,
+        "amo_status_unprocessed_id": cfg.amo_status_unprocessed_id,
+        "amo_status_primary_contact_id": cfg.amo_status_primary_contact_id,
     }
 
 
@@ -997,6 +1174,156 @@ def settings_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth
     )
 
 
+@app.get("/amo", response_class=HTMLResponse)
+def amo_settings_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
+    cfg = _get_settings(db)
+    connected = bool((cfg.amo_access_token or "").strip())
+    return templates.TemplateResponse(
+        request,
+        "amo_settings.html",
+        {
+            "cfg": cfg,
+            "connected": connected,
+        },
+    )
+
+
+@app.post("/amo/settings")
+def amo_update_settings(
+    amo_enabled: bool = Form(False),
+    amo_subdomain: str = Form(""),
+    amo_client_id: str = Form(""),
+    amo_client_secret: str = Form(""),
+    amo_redirect_uri: str = Form(""),
+    amo_pipeline_id: int = Form(4301503),
+    amo_status_unprocessed_id: int = Form(40181908),
+    amo_status_primary_contact_id: int = Form(40181911),
+    amo_webhook_secret: str = Form(""),
+    db=Depends(_db),
+    _auth=Depends(_require_auth),
+):
+    cfg = _get_settings(db)
+    cfg.amo_enabled = bool(amo_enabled)
+    cfg.amo_subdomain = (amo_subdomain or "").strip()
+    cfg.amo_client_id = (amo_client_id or "").strip()
+    cfg.amo_client_secret = (amo_client_secret or "").strip()
+    cfg.amo_redirect_uri = (amo_redirect_uri or "").strip() or (settings.public_base_url.rstrip("/") + "/api/amo/oauth/callback")
+    cfg.amo_pipeline_id = int(amo_pipeline_id or 4301503)
+    cfg.amo_status_unprocessed_id = int(amo_status_unprocessed_id or 40181908)
+    cfg.amo_status_primary_contact_id = int(amo_status_primary_contact_id or 40181911)
+    cfg.amo_webhook_secret = (amo_webhook_secret or "").strip()
+    db.add(cfg)
+    db.commit()
+    return RedirectResponse(url="/amo", status_code=303)
+
+
+@app.get("/amo/leads", response_class=HTMLResponse)
+def amo_leads_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
+    rows = db.exec(select(AmoLeadInbox).order_by(AmoLeadInbox.updated_at.desc()).limit(500)).all()
+    return templates.TemplateResponse(request, "amo_leads.html", {"rows": rows})
+
+
+@app.get("/api/amo/oauth/start")
+def amo_oauth_start(db=Depends(_db), _auth=Depends(_require_auth)):
+    cfg = _get_settings(db)
+    if not cfg.amo_subdomain or not cfg.amo_client_id:
+        raise HTTPException(status_code=400, detail="amo settings are incomplete")
+    state = secrets.token_urlsafe(24)
+    # stateless for MVP; callback will still work without strict state binding
+    params = {
+        "client_id": cfg.amo_client_id,
+        "mode": "post_message",
+        "redirect_uri": cfg.amo_redirect_uri,
+        "response_type": "code",
+        "state": state,
+    }
+    url = f"{_amo_base_url(cfg)}/oauth?{urlencode(params)}"
+    return RedirectResponse(url=url, status_code=302)
+
+
+@app.get("/api/amo/oauth/callback")
+async def amo_oauth_callback(code: str = "", db=Depends(_db)):
+    cfg = _get_settings(db)
+    if not code:
+        raise HTTPException(status_code=400, detail="missing code")
+    base = _amo_base_url(cfg)
+    payload = {
+        "client_id": cfg.amo_client_id,
+        "client_secret": cfg.amo_client_secret,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": cfg.amo_redirect_uri,
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{base}/oauth2/access_token", json=payload, timeout=25.0)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"oauth failed: {r.text[:300]}")
+    data = r.json()
+    cfg.amo_access_token = str(data.get("access_token") or "")
+    cfg.amo_refresh_token = str(data.get("refresh_token") or "")
+    expires_in = int(data.get("expires_in") or 3600)
+    cfg.amo_token_expires_at = utcnow() + timedelta(seconds=max(60, expires_in - 30))
+    db.add(cfg)
+    db.commit()
+    return RedirectResponse(url="/amo", status_code=302)
+
+
+@app.post("/api/amo/webhook")
+async def amo_webhook(request: Request, db=Depends(_db)):
+    cfg = _get_settings(db)
+    if not cfg.amo_enabled:
+        return JSONResponse({"ok": True, "ignored": "amo_disabled"})
+
+    if cfg.amo_webhook_secret:
+        sec = request.headers.get("x-amo-signature", "") or request.query_params.get("secret", "")
+        if not sec or not secrets.compare_digest(sec, cfg.amo_webhook_secret):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    raw = (await request.body()).decode("utf-8", "ignore")
+    payload_json = None
+    try:
+        payload_json = await request.json()
+    except Exception:
+        payload_json = None
+
+    lead_ids = _extract_amo_lead_ids(raw_text=raw, payload_json=payload_json)
+    created_ids: list[int] = []
+    for lid in lead_ids:
+        exists = db.exec(select(AmoLeadInbox).where(AmoLeadInbox.amo_lead_id == lid).order_by(AmoLeadInbox.created_at.desc())).first()
+        if exists and exists.status in ("new", "sent_to_tg", "queued_accept", "processing_accept"):
+            continue
+        row = AmoLeadInbox(
+            amo_lead_id=int(lid),
+            source="webhook",
+            raw_json=raw[:20000],
+            status="new",
+            updated_at=utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        created_ids.append(int(row.id or 0))
+
+        if settings.tg_chat_id:
+            kb = {
+                "inline_keyboard": [[
+                    {"text": "Принять", "callback_data": f"amo:accept:{row.id}"},
+                    {"text": "Отклонить", "callback_data": f"amo:reject:{row.id}"},
+                ]]
+            }
+            await send_message_html(
+                chat_id=settings.tg_chat_id,
+                html=f"<b>Новая заявка amo</b><br/>Lead ID: {lid}",
+                reply_markup=kb,
+            )
+            row.status = "sent_to_tg"
+            row.updated_at = utcnow()
+            db.add(row)
+            db.commit()
+
+    return JSONResponse({"ok": True, "created": len(created_ids), "ids": created_ids})
+
+
 @app.get("/discovery", response_class=HTMLResponse)
 def discovery_page(request: Request, db=Depends(_db), _auth=Depends(_require_auth)):
     cfg = _get_settings(db)
@@ -1353,28 +1680,72 @@ async def tg_webhook(request: Request) -> JSONResponse:
     chat_id = chat.get("id")
     message_id = msg.get("message_id")
 
-    # Expect: fb:lead:{id} or fb:not_lead:{id}
+    # Supported callback data:
+    # - fb:lead:{id} / fb:not_lead:{id}
+    # - amo:accept:{id} / amo:reject:{id}
     parts = data.split(":")
-    if len(parts) != 3 or parts[0] != "fb":
+    if len(parts) != 3:
         if cq_id:
-            await answer_callback_query(callback_query_id=cq_id, text="Неизвестная кнопка")
+            await answer_callback_query(callback_query_id=cq_id, text="Unknown button")
         return JSONResponse({"ok": True})
 
+    namespace = parts[0]
     action = parts[1]
     try:
-        event_id = int(parts[2])
+        obj_id = int(parts[2])
     except Exception:
         if cq_id:
-            await answer_callback_query(callback_query_id=cq_id, text="Некорректный id")
+            await answer_callback_query(callback_query_id=cq_id, text="Invalid id")
         return JSONResponse({"ok": True})
 
-    # Update DB feedback
+    if namespace == "amo":
+        with session() as db:
+            row = db.exec(select(AmoLeadInbox).where(AmoLeadInbox.id == obj_id)).first()
+            if not row:
+                if cq_id:
+                    await answer_callback_query(callback_query_id=cq_id, text="Lead not found")
+                return JSONResponse({"ok": True})
+
+            if action == "accept":
+                row.decision = "accept"
+                row.status = "queued_accept"
+                row.updated_at = utcnow()
+                db.add(row)
+                db.commit()
+                asyncio.create_task(_process_amo_accept_async(int(row.id)))
+                if cq_id:
+                    await answer_callback_query(callback_query_id=cq_id, text="Accepted: processing")
+            elif action == "reject":
+                row.decision = "reject"
+                row.status = "rejected"
+                row.updated_at = utcnow()
+                db.add(row)
+                db.commit()
+                if cq_id:
+                    await answer_callback_query(callback_query_id=cq_id, text="Rejected")
+            else:
+                if cq_id:
+                    await answer_callback_query(callback_query_id=cq_id, text="Unknown action")
+                return JSONResponse({"ok": True})
+
+        if chat_id is not None and message_id is not None:
+            try:
+                await edit_message_reply_markup(chat_id=int(chat_id), message_id=int(message_id))
+            except Exception:
+                pass
+        return JSONResponse({"ok": True})
+
+    if namespace != "fb":
+        if cq_id:
+            await answer_callback_query(callback_query_id=cq_id, text="Unknown button")
+        return JSONResponse({"ok": True})
+
     additions: list[str] = []
     with session() as db:
-        ev = db.exec(select(TgMonitorEvent).where(TgMonitorEvent.id == event_id)).first()
+        ev = db.exec(select(TgMonitorEvent).where(TgMonitorEvent.id == obj_id)).first()
         if not ev:
             if cq_id:
-                await answer_callback_query(callback_query_id=cq_id, text="Не найдено")
+                await answer_callback_query(callback_query_id=cq_id, text="Not found")
             return JSONResponse({"ok": True})
 
         ev.feedback = "lead" if action == "lead" else "not_lead"
@@ -1397,7 +1768,6 @@ async def tg_webhook(request: Request) -> JSONResponse:
                 additions = []
 
             if additions:
-                # Append new stopwords
                 existing = [x.strip() for x in (cfg.stopwords_text or "").splitlines() if x.strip()]
                 existing_set = set(x.casefold() for x in existing)
                 new = [w for w in additions if w.casefold() not in existing_set]
@@ -1409,14 +1779,13 @@ async def tg_webhook(request: Request) -> JSONResponse:
                     db.add(ev)
                     db.commit()
 
-    # UX: acknowledge and remove buttons
     if cq_id:
         if action == "lead":
-            await answer_callback_query(callback_query_id=cq_id, text="Отмечено: Лид")
+            await answer_callback_query(callback_query_id=cq_id, text="Marked: lead")
         else:
-            msg_txt = "Отмечено: Не лид"
+            msg_txt = "Marked: not lead"
             if additions:
-                msg_txt += f" (стоп-слова: {', '.join(additions[:4])})"
+                msg_txt += f" (stopwords: {', '.join(additions[:4])})"
             await answer_callback_query(callback_query_id=cq_id, text=msg_txt)
 
     if chat_id is not None and message_id is not None:
@@ -1425,14 +1794,14 @@ async def tg_webhook(request: Request) -> JSONResponse:
         except Exception:
             pass
 
-    # Optional: notify about added stopwords
     if action != "lead" and additions and settings.tg_chat_id:
         try:
             await send_message_html(
                 chat_id=settings.tg_chat_id,
-                html="<b>Стоп-слова обновлены:</b> " + ", ".join([w.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;') for w in additions]),
+                html="<b>Stopwords updated:</b> " + ", ".join([w.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;') for w in additions]),
             )
         except Exception:
             pass
 
     return JSONResponse({"ok": True})
+

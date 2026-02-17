@@ -77,6 +77,30 @@ def _migrate_sqlite() -> None:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN exclude_openai_owned_models BOOLEAN DEFAULT 1")
             if "llm_models_config_json" not in app_cols:
                 stmts.append("ALTER TABLE appsettings ADD COLUMN llm_models_config_json VARCHAR DEFAULT '{}'")
+            if "amo_enabled" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_enabled BOOLEAN DEFAULT 0")
+            if "amo_subdomain" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_subdomain VARCHAR DEFAULT ''")
+            if "amo_client_id" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_client_id VARCHAR DEFAULT ''")
+            if "amo_client_secret" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_client_secret VARCHAR DEFAULT ''")
+            if "amo_redirect_uri" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_redirect_uri VARCHAR DEFAULT ''")
+            if "amo_access_token" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_access_token VARCHAR DEFAULT ''")
+            if "amo_refresh_token" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_refresh_token VARCHAR DEFAULT ''")
+            if "amo_token_expires_at" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_token_expires_at DATETIME")
+            if "amo_pipeline_id" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_pipeline_id INTEGER DEFAULT 4301503")
+            if "amo_status_unprocessed_id" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_status_unprocessed_id INTEGER DEFAULT 40181908")
+            if "amo_status_primary_contact_id" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_status_primary_contact_id INTEGER DEFAULT 40181911")
+            if "amo_webhook_secret" not in app_cols:
+                stmts.append("ALTER TABLE appsettings ADD COLUMN amo_webhook_secret VARCHAR DEFAULT ''")
 
             tgt_res = conn.exec_driver_sql("PRAGMA table_info(discoverytarget)").fetchall()
             tgt_cols = {r[1] for r in (tgt_res or [])}
@@ -106,6 +130,24 @@ def _migrate_sqlite() -> None:
                     last_reset_in_sec INTEGER DEFAULT 0,
                     last_rate_limits_json VARCHAR DEFAULT '{}',
                     last_error VARCHAR DEFAULT ''
+                )
+                """
+            )
+            conn.exec_driver_sql(
+                """
+                CREATE TABLE IF NOT EXISTS amoleadinbox (
+                    id INTEGER PRIMARY KEY,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    amo_lead_id INTEGER DEFAULT 0,
+                    amo_account_id INTEGER DEFAULT 0,
+                    source VARCHAR DEFAULT 'webhook',
+                    raw_json VARCHAR DEFAULT '{}',
+                    status VARCHAR DEFAULT 'new',
+                    decision VARCHAR DEFAULT '',
+                    result_json VARCHAR DEFAULT '{}',
+                    error VARCHAR DEFAULT '',
+                    tg_message_id INTEGER DEFAULT 0
                 )
                 """
             )

@@ -102,6 +102,20 @@ class AppSettings(SQLModel, table=True):
     queries_per_tick: int = Field(default=25)
     search_results_per_query: int = Field(default=20)
 
+    # amoCRM integration
+    amo_enabled: bool = Field(default=False)
+    amo_subdomain: str = ""
+    amo_client_id: str = ""
+    amo_client_secret: str = ""
+    amo_redirect_uri: str = ""
+    amo_access_token: str = ""
+    amo_refresh_token: str = ""
+    amo_token_expires_at: Optional[datetime] = None
+    amo_pipeline_id: int = Field(default=4301503)
+    amo_status_unprocessed_id: int = Field(default=40181908)
+    amo_status_primary_contact_id: int = Field(default=40181911)
+    amo_webhook_secret: str = ""
+
 
 class DiscoveryLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -153,3 +167,21 @@ class LLMModelStat(SQLModel, table=True):
     last_reset_in_sec: int = Field(default=0)
     last_rate_limits_json: str = "{}"
     last_error: str = ""
+
+
+class AmoLeadInbox(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+    amo_lead_id: int = Field(default=0, index=True)
+    amo_account_id: int = Field(default=0, index=True)
+    source: str = Field(default="webhook", index=True)
+    raw_json: str = "{}"
+
+    status: str = Field(default="new", index=True)  # new | sent_to_tg | queued_accept | accepted | rejected | error
+    decision: str = Field(default="", index=True)   # accept | reject
+    result_json: str = "{}"
+    error: str = ""
+
+    tg_message_id: int = Field(default=0, index=True)

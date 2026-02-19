@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
@@ -18,21 +18,25 @@
       }
     </script>
     <style>
-      :root { --bg:#0b0d10; --panel:#11151b; --text:#e7eef7; --muted:#9db0c4; --border:rgba(255,255,255,.1); }
-      :root[data-theme="light"] { --bg:#f6f7fb; --panel:#fff; --text:#0f172a; --muted:#475569; --border:rgba(2,6,23,.1); }
-      body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui; }
-      .wrap { max-width:1000px; margin:24px auto; padding:0 16px; }
-      .top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; text-decoration:none; cursor:pointer; white-space:nowrap; }
+      :root { --bg:#0b0d10; --panel:#11151b; --text:#e7eef7; --muted:#9db0c4; --border:rgba(255,255,255,.12); --ok:#2ecc71; --bad:#ff5c7a; }
+      :root[data-theme="light"] { --bg:#f6f7fb; --panel:#fff; --text:#0f172a; --muted:#475569; --border:rgba(2,6,23,.12); }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+      .wrap { max-width:1040px; margin:24px auto; padding:0 16px; }
+      .top { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; }
       .actions { display:flex; gap:8px; flex-wrap:wrap; }
-      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
+      .btn { height:36px; min-width:112px; display:inline-flex; align-items:center; justify-content:center; padding:0 12px; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:12px; text-decoration:none; cursor:pointer; white-space:nowrap; font-size:13px; line-height:1; }
+      .btn.danger { color:var(--bad); border-color:rgba(255,92,122,.35); }
+      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:16px; padding:16px; }
       .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
       label { display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }
-      input { width:100%; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:10px; padding:10px; }
+      input { width:100%; height:38px; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:10px; padding:8px 10px; }
+      .line { display:flex; align-items:center; gap:8px; }
       .save { margin-top:12px; display:flex; justify-content:flex-end; }
-      .hint { color:var(--muted); font-size:12px; margin-top:8px; }
-      .ok { color:#2ecc71; }
-      @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+      .hint { color:var(--muted); font-size:12px; margin-top:10px; line-height:1.45; }
+      .ok { color:var(--ok); }
+      code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+      @media (max-width: 900px) { .grid { grid-template-columns:1fr; } .btn { min-width:unset; width:100%; } .actions { width:100%; } }
     </style>
   </head>
   <body>
@@ -49,26 +53,78 @@
 
       <div class="card">
         <div class="hint">Статус: {% if connected %}<span class="ok">подключено</span>{% else %}не подключено{% endif %}</div>
+
+        {% if connected %}
+        <div class="actions" style="margin-top:10px;">
+          <a class="btn danger" href="/api/amo/oauth/revoke">Отозвать доступ</a>
+        </div>
+        {% endif %}
+
         <form method="post" action="/amo/settings">
           <div class="grid">
-            <div><label><input type="checkbox" name="amo_enabled" value="true" {% if cfg.amo_enabled %}checked{% endif %}/> Включить обработку amo</label></div>
-            <div><label>Поддомен amo (без .amocrm.ru)</label><input name="amo_subdomain" value="{{ cfg.amo_subdomain }}" /></div>
-            <div><label>Client ID</label><input name="amo_client_id" value="{{ cfg.amo_client_id }}" /></div>
-            <div><label>Client Secret</label><input name="amo_client_secret" value="{{ cfg.amo_client_secret }}" /></div>
-            <div><label>Redirect URI</label><input name="amo_redirect_uri" value="{{ cfg.amo_redirect_uri }}" /></div>
-            <div><label>Webhook secret (опционально)</label><input name="amo_webhook_secret" value="{{ cfg.amo_webhook_secret }}" /></div>
-            <div><label>ID воронки</label><input name="amo_pipeline_id" value="{{ cfg.amo_pipeline_id }}" /></div>
-            <div><label>ID этапа "Неразобранное"</label><input name="amo_status_unprocessed_id" value="{{ cfg.amo_status_unprocessed_id }}" /></div>
-            <div><label>ID этапа "Первичный контакт"</label><input name="amo_status_primary_contact_id" value="{{ cfg.amo_status_primary_contact_id }}" /></div>
+            <div class="line" style="margin-top:8px;">
+              <input id="amo_enabled" type="checkbox" name="amo_enabled" value="true" {% if cfg.amo_enabled %}checked{% endif %} style="width:auto; height:auto;"/>
+              <label for="amo_enabled" style="margin:0; font-size:14px; color:var(--text);">Включить обработку amo</label>
+            </div>
+            <div></div>
+
+            <div>
+              <label>Поддомен amo (без .amocrm.ru)</label>
+              <input name="amo_subdomain" value="{{ cfg.amo_subdomain }}" placeholder="your-subdomain" />
+            </div>
+            <div>
+              <label>Webhook secret (опционально)</label>
+              <input name="amo_webhook_secret" value="{{ cfg.amo_webhook_secret }}" />
+            </div>
+
+            <div>
+              <label>Integration ID (Client ID)</label>
+              <input name="amo_client_id" value="{{ cfg.amo_client_id }}" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx" />
+            </div>
+            <div>
+              <label>Secret Key (Client Secret)</label>
+              <input name="amo_client_secret" value="{{ cfg.amo_client_secret }}" type="password" placeholder="xxxxxx" />
+            </div>
+
+            <div>
+              <label>Redirect URI</label>
+              <input name="amo_redirect_uri" value="{{ cfg.amo_redirect_uri }}" readonly style="opacity:0.75;" />
+            </div>
+            <div>
+              <label>Webhook URL</label>
+              <input value="{{ webhook_url }}" readonly style="opacity:0.75;" />
+            </div>
+
+            <div>
+              <label>ID воронки</label>
+              <input name="amo_pipeline_id" value="{{ cfg.amo_pipeline_id }}" />
+            </div>
+            <div>
+              <label>ID этапа «Неразобранное»</label>
+              <input name="amo_status_unprocessed_id" value="{{ cfg.amo_status_unprocessed_id }}" />
+            </div>
+
+            <div>
+              <label>ID этапа «Первичный контакт»</label>
+              <input name="amo_status_primary_contact_id" value="{{ cfg.amo_status_primary_contact_id }}" />
+            </div>
           </div>
           <div class="save"><button class="btn" type="submit">Сохранить</button></div>
         </form>
+
+        {% if not connected %}
         <div class="actions" style="margin-top:10px;">
-          <a class="btn" href="/api/amo/oauth/start">Подключить amo (OAuth)</a>
+          <a class="btn" href="/api/amo/oauth/start">Авторизоваться в amoCRM</a>
         </div>
-        <div class="hint">Webhook URL: <code>{{ cfg.amo_redirect_uri|replace('/api/amo/oauth/callback','/api/amo/webhook') }}</code></div>
+        {% endif %}
+
+        <div class="hint" style="margin-top:12px;">
+          1. Создайте интеграцию в amoMarket и получите Integration ID / Secret Key.<br/>
+          2. Укажите Redirect URI в настройках интеграции.<br/>
+          3. Нажмите «Авторизоваться в amoCRM» и подтвердите доступ.<br/>
+          4. Используйте Webhook URL из поля выше.
+        </div>
       </div>
     </div>
   </body>
 </html>
-

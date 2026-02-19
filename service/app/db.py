@@ -147,10 +147,24 @@ def _migrate_sqlite() -> None:
                     decision VARCHAR DEFAULT '',
                     result_json VARCHAR DEFAULT '{}',
                     error VARCHAR DEFAULT '',
+                    accept_attempts INTEGER DEFAULT 0,
+                    accept_started_at DATETIME,
+                    accept_deadline_at DATETIME,
+                    accept_last_try_at DATETIME,
                     tg_message_id INTEGER DEFAULT 0
                 )
                 """
             )
+            amo_box_res = conn.exec_driver_sql("PRAGMA table_info(amoleadinbox)").fetchall()
+            amo_box_cols = {r[1] for r in (amo_box_res or [])}
+            if "accept_attempts" not in amo_box_cols:
+                stmts.append("ALTER TABLE amoleadinbox ADD COLUMN accept_attempts INTEGER DEFAULT 0")
+            if "accept_started_at" not in amo_box_cols:
+                stmts.append("ALTER TABLE amoleadinbox ADD COLUMN accept_started_at DATETIME")
+            if "accept_deadline_at" not in amo_box_cols:
+                stmts.append("ALTER TABLE amoleadinbox ADD COLUMN accept_deadline_at DATETIME")
+            if "accept_last_try_at" not in amo_box_cols:
+                stmts.append("ALTER TABLE amoleadinbox ADD COLUMN accept_last_try_at DATETIME")
 
             for st in stmts:
                 conn.exec_driver_sql(st)

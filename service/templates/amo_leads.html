@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
@@ -16,22 +16,35 @@
         document.documentElement.dataset.theme = next;
         localStorage.setItem("theme", next);
       }
+      function toggleJson(btn){
+        const target = btn.nextElementSibling;
+        if(!target){ return; }
+        target.style.display = target.style.display === 'none' ? 'block' : 'none';
+        btn.textContent = target.style.display === 'none' ? 'Показать JSON' : 'Скрыть JSON';
+      }
     </script>
     <style>
-      :root { --bg:#0b0d10; --panel:#11151b; --text:#e7eef7; --muted:#9db0c4; --border:rgba(255,255,255,.1); --ok:#2ecc71; --bad:#ff5c7a; }
-      :root[data-theme="light"] { --bg:#f6f7fb; --panel:#fff; --text:#0f172a; --muted:#475569; --border:rgba(2,6,23,.1); }
-      body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui; }
-      .wrap { max-width:1200px; margin:24px auto; padding:0 16px; }
-      .top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-      .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 10px; border-radius:10px; text-decoration:none; cursor:pointer; white-space:nowrap; }
+      :root { --bg:#0b0d10; --panel:#11151b; --text:#e7eef7; --muted:#9db0c4; --border:rgba(255,255,255,.12); --ok:#2ecc71; --bad:#ff5c7a; --warn:#f39c12; --info:#3498db; }
+      :root[data-theme="light"] { --bg:#f6f7fb; --panel:#fff; --text:#0f172a; --muted:#475569; --border:rgba(2,6,23,.12); }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+      .wrap { max-width:1040px; margin:24px auto; padding:0 16px; }
+      .top { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; }
       .actions { display:flex; gap:8px; flex-wrap:wrap; }
-      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:14px; padding:14px; }
-      table { width:100%; border-collapse:collapse; min-width:1000px; }
-      th, td { border-bottom:1px solid var(--border); padding:8px; text-align:left; font-size:12px; vertical-align:top; }
+      .btn { height:36px; min-width:112px; display:inline-flex; align-items:center; justify-content:center; padding:0 12px; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:12px; text-decoration:none; cursor:pointer; white-space:nowrap; font-size:13px; line-height:1; }
+      .card { margin-top:14px; border:1px solid var(--border); background:var(--panel); border-radius:16px; padding:14px; overflow:auto; }
+      table { width:100%; border-collapse:collapse; table-layout:fixed; }
+      th, td { border-bottom:1px solid var(--border); padding:8px; text-align:left; font-size:12px; vertical-align:top; word-wrap:break-word; }
       th { color:var(--muted); }
-      .pill { border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; }
-      .ok { color:var(--ok); }
-      .bad { color:var(--bad); }
+      .pill { border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:11px; display:inline-block; }
+      .ok { color:var(--ok); border-color:var(--ok) !important; }
+      .bad { color:var(--bad); border-color:var(--bad) !important; }
+      .warn { color:var(--warn); border-color:var(--warn) !important; }
+      .info { color:var(--info); border-color:var(--info) !important; }
+      .json-preview { margin-top:6px; max-height:180px; overflow:auto; font-size:10px; background:rgba(0,0,0,.2); padding:6px; border-radius:8px; }
+      .toggle-link { color:var(--muted); text-decoration:underline; cursor:pointer; font-size:11px; }
+      a.lead-link { color:var(--text); text-decoration:none; border-bottom:1px dashed var(--muted); }
+      @media (max-width: 900px) { .btn { min-width:unset; width:100%; } .actions { width:100%; } }
     </style>
   </head>
   <body>
@@ -39,21 +52,24 @@
       <div class="top">
         <h2 style="margin:0;">Заявки amo</h2>
         <div class="actions">
-          <a class="btn" href="/amo">AmoCRM</a>
+          <a class="btn" href="/amo">Настройки</a>
           <a class="btn" href="/">Дашборд</a>
           <button class="btn" onclick="toggleTheme()">Сменить тему</button>
         </div>
       </div>
-      <div class="card" style="overflow:auto;">
+
+      <div class="card">
         <table>
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Время</th>
-              <th>Lead ID</th>
-              <th>Статус</th>
-              <th>Решение</th>
-              <th>Ошибка</th>
+              <th style="width:56px;">ID</th>
+              <th style="width:72px;">Время</th>
+              <th style="width:96px;">Lead ID</th>
+              <th style="width:122px;">Статус</th>
+              <th style="width:96px;">Решение</th>
+              <th style="width:74px;">Попыток</th>
+              <th>Данные</th>
+              <th style="width:220px;">Ошибка</th>
             </tr>
           </thead>
           <tbody>
@@ -61,10 +77,35 @@
             <tr>
               <td>{{ r.id }}</td>
               <td>{{ msk_hhmm(r.updated_at) }}</td>
-              <td>{{ r.amo_lead_id }}</td>
-              <td><span class="pill {% if r.status in ['accepted'] %}ok{% elif r.status in ['error','rejected'] %}bad{% endif %}">{{ r.status }}</span></td>
-              <td>{{ r.decision or "-" }}</td>
-              <td>{{ r.error }}</td>
+              <td>
+                <a class="lead-link" href="https://{{ cfg.amo_subdomain }}.amocrm.ru/leads/detail/{{ r.amo_lead_id }}" target="_blank">{{ r.amo_lead_id }}</a>
+              </td>
+              <td>
+                {% if r.status == 'accepted' %}
+                  <span class="pill ok">accepted</span>
+                {% elif r.status == 'rejected' %}
+                  <span class="pill bad">rejected</span>
+                {% elif r.status == 'error' %}
+                  <span class="pill bad">error</span>
+                {% elif r.status in ['queued_accept', 'processing_accept'] %}
+                  <span class="pill info">{{ r.status }}</span>
+                {% elif r.status == 'sent_to_tg' %}
+                  <span class="pill warn">sent_to_tg</span>
+                {% else %}
+                  <span class="pill">{{ r.status }}</span>
+                {% endif %}
+              </td>
+              <td>{{ r.decision or '-' }}</td>
+              <td>{{ r.accept_attempts or 0 }}</td>
+              <td>
+                {% if r.result_json %}
+                  <span class="toggle-link" onclick="toggleJson(this)">Показать JSON</span>
+                  <pre class="json-preview" style="display:none;">{{ r.result_json[:1000] }}{% if r.result_json|length > 1000 %}...{% endif %}</pre>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>{{ r.error[:240] if r.error else '-' }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -73,4 +114,3 @@
     </div>
   </body>
 </html>
-

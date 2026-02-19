@@ -183,5 +183,9 @@ class AmoLeadInbox(SQLModel, table=True):
     decision: str = Field(default="", index=True)   # accept | reject
     result_json: str = "{}"
     error: str = ""
+    accept_attempts: int = Field(default=0)
+    accept_started_at: Optional[datetime] = None
+    accept_deadline_at: Optional[datetime] = None
+    accept_last_try_at: Optional[datetime] = None
 
     tg_message_id: int = Field(default=0, index=True)

@@ -68,3 +68,8 @@ class ProviderModelsRequest(BaseModel):
     provider: str = Field(min_length=2)
     api_key: str = ""
     base_url: str = ""
+
+
+class AmoLeadFullDataRequest(BaseModel):
+    lead_id: int = Field(description="ID сделки в amoCRM")
+    integration_url: str = Field(default="", description="URL внешней интеграции (опционально)")
